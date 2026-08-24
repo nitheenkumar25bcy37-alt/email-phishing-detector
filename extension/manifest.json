@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Agentic MX - Real-Time Webmail Guard",
+  "version": "2.0.0",
+  "description": "Zero-click automated email threat scoring and in-line phishing indicators.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "https://mail.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

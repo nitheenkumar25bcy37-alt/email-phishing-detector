@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+dnspython
+python-whois
+requests
+scikit-learn
+joblib
+streamlit
+streamlit-folium
+folium
+plotly
+networkx
+pyvis

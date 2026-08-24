@@ -1,0 +1,22 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.joblib
+
+# Secrets & Environment variables
+.env
+
+# Local Databases & Logs
+*.db
+data/evidence/*.db
+*.log
+
+# Streamlit & OS artifacts
+.streamlit/
+.DS_Store

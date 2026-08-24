@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Agentic MX</title>
+  <style>
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      margin: 0;
+      padding: 16px;
+    }
+    h2 {
+      font-size: 16px;
+      margin: 0 0 4px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    p.subtitle {
+      font-size: 11px;
+      color: #94a3b8;
+      margin: 0 0 16px 0;
+    }
+    .upload-zone {
+      border: 1px dashed #334155;
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+      background-color: #1e293b;
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    button.btn {
+      width: 100%;
+      background-color: #ef4444;
+      color: #ffffff;
+      border: none;
+      padding: 10px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.btn:hover {
+      background-color: #dc2626;
+    }
+    #result-box {
+      margin-top: 14px;
+      background: #1e293b;
+      border-radius: 8px;
+      padding: 12px;
+      display: none;
+      border-left: 4px solid #ef4444;
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: bold;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .badge-critical { background-color: #991b1b; color: #fecaca; }
+    .badge-safe { background-color: #166534; color: #bbf7d0; }
+    .metric-row {
+      font-size: 12px;
+      color: #cbd5e1;
+      margin: 4px 0;
+    }
+    .link-dash {
+      display: block;
+      margin-top: 10px;
+      font-size: 11px;
+      color: #38bdf8;
+      text-decoration: none;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h2>🛡️ Agentic MX</h2>
+  <p class="subtitle">RFC 822 Forensics & Threat Assessment</p>
+
+  <label for="eml-input" class="upload-zone" id="upload-label">
+    📁 Click to Select .EML File
+  </label>
+  <input type="file" id="eml-input" accept=".eml,.txt">
+
+  <button class="btn" id="scan-btn">⚡ Run Forensic Scan</button>
+
+  <div id="result-box">
+    <div id="badge-container"></div>
+    <div class="metric-row"><strong>Threat Score:</strong> <span id="score-val">--</span></div>
+    <div class="metric-row"><strong>ML Verdict:</strong> <span id="ml-val">--</span></div>
+    <div class="metric-row"><strong>Origin IP:</strong> <span id="ip-val">--</span></div>
+    <div class="metric-row"><strong>Evidence Seal:</strong> <span id="hash-val" style="font-family:monospace;">--</span></div>
+    <a href="http://localhost:8501" target="_blank" class="link-dash">Open Full SOC Dashboard ↗</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
