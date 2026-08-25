@@ -1,6 +1,6 @@
 // Agentic MX - Real-Time Webmail Guard (Manifest V3)
 // Production Cloud Endpoints
-const API_BASE_URL = "https://email-phishing-detector-vbg5.onrender.com";
+const API_BASE_URL = "https://email-phishing-detector-1-z4wj.onrender.com";
 const SOC_DASHBOARD_URL = "https://email-phishing-detector-agentic-mx-v2.streamlit.app";
 
 let lastScannedId = "";
