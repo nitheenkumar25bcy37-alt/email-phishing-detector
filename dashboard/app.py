@@ -1,179 +1,144 @@
 import streamlit as st
-import requests
-import json
 import sqlite3
+import json
+import os
 import folium
 from streamlit_folium import st_folium
-from pathlib import Path
+import requests
 
 st.set_page_config(
-    page_title="Agentic MX - Forensic Dashboard",
+    page_title="Agentic MX | SOC Investigation Platform",
     page_icon="🛡️",
     layout="wide"
 )
 
-API_URL = "http://127.0.0.1:8000/api/v1/analyze/file"
-DB_PATH = "data/evidence/threat_logs.db"
+st.title("🛡️ Agentic MX — Digital Forensics & Threat Intelligence")
+st.markdown("Automated RFC 822 Email Forensics, ML Classification & Chain-of-Custody Vault")
 
-# Persistent session state for single-page workflow
-if "report" not in st.session_state:
-    st.session_state["report"] = None
-if "last_uploaded_file" not in st.session_state:
-    st.session_state["last_uploaded_file"] = None
+# --- Helper Functions ---
+def get_report_by_hash(evidence_hash: str):
+    db_path = os.path.join("data", "evidence", "threat_logs.db")
+    if not os.path.exists(db_path):
+        return None
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT forensic_data FROM chain_of_custody WHERE evidence_hash = ? LIMIT 1", (evidence_hash,))
+    row = cursor.fetchone()
+    conn.close()
+    return json.loads(row[0]) if row else None
 
-st.title("🛡️ Agentic MX: AI Threat & Forensic Platform")
-st.caption("RFC 822 Email Forensics | Geolocation Tracking | Chain-of-Custody Intelligence")
+def get_latest_report():
+    db_path = os.path.join("data", "evidence", "threat_logs.db")
+    if not os.path.exists(db_path):
+        return None
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT forensic_data FROM chain_of_custody ORDER BY id DESC LIMIT 1")
+    row = cursor.fetchone()
+    conn.close()
+    return json.loads(row[0]) if row else None
 
-tab_selection = st.sidebar.radio("Navigation", ["🔍 Live Email Analyzer", "📊 Campaign Intelligence & Case Logs"])
+def render_forensic_report(report):
+    meta = report.get("metadata", {})
+    score_data = report.get("threat_score", {})
+    score = score_data.get("score", 0)
+    risk_level = score_data.get("risk_level", "LOW")
+    ml = report.get("ml_assessment", {})
+    infra = report.get("threat_infrastructure", {})
+    geo = infra.get("geolocation") or {}
+    domain = infra.get("domain_intelligence") or {}
+    evidence = report.get("evidence_seal", {})
+    ai_brief = report.get("ai_investigative_briefing", {})
+    nlp_cues = report.get("nlp_indicators", {})
 
-# ================= TAB 1: LIVE ANALYZER =================
-if tab_selection == "🔍 Live Email Analyzer":
-    st.subheader("Ingest & Analyze Raw Email (.eml)")
-    uploaded_file = st.file_uploader("Upload raw email file", type=["eml", "txt"])
+    st.success("✅ **Live Webmail Incident Loaded Automatically via Cryptographic Seal**")
+    
+    # 1. Metric Row
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        color = "red" if score >= 60 else "orange" if score >= 40 else "green"
+        st.metric("Threat Score", f"{score}/100", delta=risk_level, delta_color="inverse")
+    with c2:
+        st.metric("ML Classification", ml.get("ml_classification", "N/A"), f"{ml.get('confidence_score', 0)}% Conf.")
+    with c3:
+        st.metric("Origin Country", geo.get("country", "Unknown"), geo.get("asn", "Local/Direct"))
+    with c4:
+        st.metric("Domain Status", "Suspicious" if domain.get("is_newly_registered") else "Active", f"Risk Flags: {len(domain.get('risk_flags', []))}")
 
-    if uploaded_file != st.session_state["last_uploaded_file"]:
-        st.session_state["report"] = None
-        st.session_state["last_uploaded_file"] = uploaded_file
+    st.divider()
 
-    if uploaded_file is not None:
-        if st.button("🚀 Run Deep Forensics", type="primary"):
-            with st.spinner("Executing ML inference, querying OSINT, and synthesizing AI briefing..."):
-                try:
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "message/rfc822")}
-                    response = requests.post(API_URL, files=files)
-                    
-                    if response.status_code == 200:
-                        st.session_state["report"] = response.json().get("report", {})
-                    else:
-                        st.error(f"Analysis failed: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to FastAPI backend: {e}")
+    # 2. Tabs for Deep Analysis
+    t1, t2, t3, t4 = st.tabs(["📋 Executive Summary & AI Brief", "🌍 GeoIP & Infrastructure", "🔍 NLP & Social Engineering", "🔐 Evidence & Chain-of-Custody"])
 
-    # Render analysis findings
-    if st.session_state["report"] is not None:
-        report = st.session_state["report"]
-        
-        # --- TOP METRIC CARDS ---
-        st.divider()
-        col1, col2, col3, col4 = st.columns(4)
-        
-        threat_data = report.get("threat_score", {})
-        score_val = threat_data.get("score", 0)
-        risk_val = threat_data.get("risk_level", "UNKNOWN")
-        
-        ml_pred = report["ml_assessment"]["ml_classification"]
-        confidence = report["ml_assessment"]["confidence_score"]
-        
-        col1.metric("Threat Score", f"{score_val}/100", delta=risk_val, delta_color="inverse" if score_val >= 60 else "normal")
-        col2.metric("ML Classification", f"{ml_pred} ({confidence}%)")
-        col3.metric("Origin IP", report["routing_forensics"]["origin_ip"] or "Unknown")
-        col4.metric("Evidence Seal", report["evidence_seal"]["sha256_hash"][:10] + "...")
-        
-        # --- AI FORENSIC EXECUTIVE BRIEFING ---
-        ai_brief = report.get("ai_investigative_briefing", {})
-        st.markdown("### 🧠 AI Forensic Executive Assessment")
-        st.info(f"**Investigative Summary:** {ai_brief.get('executive_summary', 'N/A')}")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Identified Threat Actor Tactics:**")
-            for tactic in ai_brief.get("threat_actor_tactics", []):
-                st.markdown(f"- ⚠️ {tactic}")
-        with c2:
-            st.markdown("**Recommended SOC Action Items:**")
-            for action in ai_brief.get("recommended_soc_actions", []):
-                st.markdown(f"- 🛡️ {action}")
+    with t1:
+        st.subheader("Executive Incident Briefing")
+        st.markdown(f"**Subject:** `{meta.get('subject', 'N/A')}`")
+        st.markdown(f"**From:** `{meta.get('from', 'N/A')}`")
+        if ai_brief:
+            st.info(f"**Executive Threat Assessment:**\n\n{ai_brief.get('executive_threat_assessment', 'No assessment available.')}")
+            st.warning(f"**Attack Vector Identified:** {ai_brief.get('attack_vector_identified', 'N/A')}")
+            st.markdown(f"**Remediation Recommendation:** {ai_brief.get('recommended_analyst_action', 'N/A')}")
 
-        st.divider()
-        col_left, col_right = st.columns([1, 1])
-        
-        with col_left:
-            st.markdown("### 📋 Threat Indicators & NLP Cues")
-            st.write("**Subject:**", report["metadata"]["subject"])
-            st.write("**From:**", report["metadata"]["from"])
-            
-            cues = report["nlp_indicators"]
-            if any(cues.values()):
-                for category, terms in cues.items():
-                    if terms:
-                        st.warning(f"⚠️ **{category.replace('_', ' ').title()}:** {', '.join(terms)}")
-            else:
-                st.success("✓ No social engineering urgency patterns detected.")
-                
-            domain_intel = report["threat_infrastructure"]["domain_intelligence"]
-            st.write(f"- **Domain Age:** {domain_intel.get('domain_age_days', 'Unknown')} days")
-            st.write(f"- **Valid MX Records:** {domain_intel.get('has_valid_mx')}")
-            if domain_intel.get("risk_flags"):
-                for flag in domain_intel["risk_flags"]:
-                    st.error(f"🚩 Risk Flag: {flag}")
-        
-        with col_right:
-            st.markdown("### 🌍 Origin Geolocation & Infrastructure")
-            geo = report["threat_infrastructure"]["geolocation"]
-            if geo and geo.get("latitude") and geo.get("longitude"):
-                st.write(f"**Location:** {geo.get('city')}, {geo.get('country')}")
-                st.write(f"**ISP / ASN:** {geo.get('isp')} ({geo.get('asn')})")
-                if geo.get("is_cloud_vps"):
-                    st.error("⚠️ Sender infrastructure originates from a Cloud VPS/Hosting provider.")
-                
-                m = folium.Map(location=[geo["latitude"], geo["longitude"]], zoom_start=4)
-                folium.Marker(
-                    [geo["latitude"], geo["longitude"]],
-                    popup=f"Origin: {geo.get('ip')}<br>ISP: {geo.get('isp')}",
-                    icon=folium.Icon(color="red" if ml_pred == "Phishing" else "green", icon="info-sign")
-                ).add_to(m)
-                st_folium(m, height=280, width=500, returned_objects=[])
-            else:
-                st.info("No public origin IP detected in headers for mapping.")
+    with t2:
+        st.subheader("Origin Infrastructure & Geolocation")
+        lat = geo.get("latitude")
+        lon = geo.get("longitude")
+        if lat and lon:
+            m = folium.Map(location=[lat, lon], zoom_start=4)
+            folium.Marker(
+                [lat, lon],
+                popup=f"Origin IP: {geo.get('ip')}<br>ASN: {geo.get('asn')}",
+                icon=folium.Icon(color="red" if geo.get("is_cloud_vps") else "blue", icon="shield")
+            ).add_to(m)
+            st_folium(m, height=350, width=700)
+        else:
+            st.info("Direct webmail injection without upstream IP hops.")
 
-        # --- EXPORT CERTIFIED DOSSIER ---
-        st.divider()
-        dossier_json = json.dumps(report, indent=2)
+    with t3:
+        st.subheader("Extracted Social Engineering & Urgency Cues")
+        for category, cues in nlp_cues.items():
+            if cues:
+                st.write(f"**{category.replace('_', ' ').title()}:**")
+                for cue in cues:
+                    st.code(cue, language="text")
+
+    with t4:
+        st.subheader("Cryptographic Evidence Vault & Chain-of-Custody")
+        st.json({
+            "evidence_seal": evidence,
+            "forensic_report": report
+        })
         st.download_button(
-            label="📥 Export Certified Forensic Dossier (JSON)",
-            data=dossier_json,
-            file_name=f"forensic_dossier_{report['evidence_seal']['sha256_hash'][:8]}.json",
+            "📥 Download Forensic Dossier (JSON)",
+            data=json.dumps(report, indent=2),
+            file_name=f"dossier_{evidence.get('sha256_hash', 'evidence')[:10]}.json",
             mime="application/json"
         )
 
-# ================= TAB 2: CAMPAIGN LOGS =================
-elif tab_selection == "📊 Campaign Intelligence & Case Logs":
-    st.subheader("Case Management & Threat Actor Campaign Correlation")
-    
-    if Path(DB_PATH).exists():
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, evidence_hash, sealed_timestamp, origin_ip, ml_prediction, forensic_data FROM chain_of_custody ORDER BY id DESC")
-            records = cursor.fetchall()
-            
-        if records:
-            st.write(f"**Total Logged Incidents:** {len(records)}")
-            
-            ip_counts = {}
-            for r in records:
-                ip = r[3]
-                if ip and ip != "Unknown":
-                    ip_counts[ip] = ip_counts.get(ip, 0) + 1
-                    
-            top_campaign_ips = {k: v for k, v in ip_counts.items() if v > 1}
-            if top_campaign_ips:
-                for ip, count in top_campaign_ips.items():
-                    st.warning(f"🚨 **Coordinated Threat Campaign Detected:** Origin IP `{ip}` has sent {count} distinct attack payloads.")
-            else:
-                st.info("No multi-attack IP clusters detected yet.")
-                
-            st.markdown("### 📁 Evidence Vault")
-            table_data = []
-            for r in records:
-                table_data.append({
-                    "Case ID": r[0],
-                    "Evidence SHA-256": r[1][:16] + "...",
-                    "Sealed Timestamp": r[2],
-                    "Origin IP": r[3],
-                    "ML Classification": r[4]
-                })
-            st.dataframe(table_data, use_container_width=True)
-        else:
-            st.info("Evidence vault is currently empty. Analyze an email to populate logs.")
+# --- Routing Logic ---
+query_hash = st.query_params.get("hash")
+report_to_display = None
+
+if query_hash:
+    report_to_display = get_report_by_hash(query_hash)
+
+# Fallback: Check if user uploaded a file manually
+if not report_to_display:
+    st.sidebar.header("Manual Inspection")
+    uploaded_file = st.sidebar.file_uploader("Upload .EML File for Analysis", type=["eml", "txt"])
+    if uploaded_file:
+        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "message/rfc822")}
+        res = requests.post("http://127.0.0.1:8000/api/v1/analyze/file", files=files)
+        if res.status_code == 200:
+            report_to_display = res.json().get("report")
+
+if report_to_display:
+    render_forensic_report(report_to_display)
+else:
+    # If opened directly with no query param and no file, show latest activity
+    latest = get_latest_report()
+    if latest:
+        st.info("Displaying most recent incident recorded by Agentic MX:")
+        render_forensic_report(latest)
     else:
-        st.info("Database file not yet initialized.")
+        st.info("No active threat loaded. Open an email in Gmail or upload a .eml file on the sidebar.")
