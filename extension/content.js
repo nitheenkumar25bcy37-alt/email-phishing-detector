@@ -1,6 +1,5 @@
 let lastScannedId = "";
 
-// Observes Gmail DOM changes when an email is opened
 const observer = new MutationObserver(() => {
   scanCurrentEmail();
 });
@@ -8,7 +7,6 @@ const observer = new MutationObserver(() => {
 observer.observe(document.body, { childList: true, subtree: true });
 
 async function scanCurrentEmail() {
-  // Selectors for Gmail active email view
   const subjectEl = document.querySelector("h2.hP");
   const senderEl = document.querySelector("span.gD, span[email]");
   const bodyEl = document.querySelector("div.a3s.aiL, div[role='listitem'] div.a3s");
@@ -20,11 +18,9 @@ async function scanCurrentEmail() {
   const body = bodyEl.innerText.trim();
   const emailId = subject + sender;
 
-  // Prevent duplicate background scans on the same open email
   if (lastScannedId === emailId) return;
   lastScannedId = emailId;
 
-  // Insert loading banner
   renderBanner("⏳ Agentic MX: Scanning email security...", "#1e293b", "#38bdf8", null);
 
   try {
@@ -73,6 +69,10 @@ function renderBanner(htmlContent, bgColor, textColor, report) {
     }
   }
 
+  // Pass hash parameter to automatically load the specific incident
+  const hash = report && report.evidence_seal ? report.evidence_seal.sha256_hash : "";
+  const dashUrl = hash ? `http://localhost:8501/?hash=${hash}` : "http://localhost:8501";
+
   Object.assign(banner.style, {
     backgroundColor: bgColor,
     color: textColor,
@@ -89,7 +89,7 @@ function renderBanner(htmlContent, bgColor, textColor, report) {
 
   banner.innerHTML = `
     <div>${htmlContent}</div>
-    <a href="http://localhost:8501" target="_blank" style="color:#ffffff; text-decoration:underline; font-size:12px; font-weight:bold;">
+    <a href="${dashUrl}" target="_blank" style="color:#ffffff; text-decoration:underline; font-size:12px; font-weight:bold;">
       SOC Dashboard ↗
     </a>
   `;
