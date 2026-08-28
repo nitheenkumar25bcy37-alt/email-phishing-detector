@@ -1,147 +1,138 @@
 """
-Pydantic response models for Agentic MX API
-Provides type safety and schema validation for all endpoints
+Agentic MX - Data Models & Pydantic Schemas
+Defines structured response shapes for API responses and component communications.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime
-
+from typing import List, Dict, Any, Optional
 
 class EvidenceSeal(BaseModel):
-    """SHA-256 evidence hash and metadata"""
     sha256_hash: str
     byte_size: int
     sealed_at: str
     encoding: str = "utf-8"
 
-
-class MetadataInfo(BaseModel):
-    """Email metadata extraction"""
-    from_address: Optional[str] = None
-    to_address: Optional[str] = None
-    subject: Optional[str] = None
-    date: Optional[str] = None
-    message_id: Optional[str] = None
+class Metadata(BaseModel):
+    from_address: str = ""
+    to_address: str = ""
+    subject: str = ""
+    date: str = ""
+    message_id: str = ""
     received_count: int = 0
+    attachment_count: int = 0
+    is_multipart: bool = False
 
+class ScoreBreakdown(BaseModel):
+    ml_score: float = 0.0
+    nlp_score: float = 0.0
+    url_score: float = 0.0
+    domain_score: float = 0.0
+    auth_score: float = 0.0
+    infra_score: float = 0.0
+
+class ThreatScore(BaseModel):
+    score: int = Field(ge=0, le=100)
+    risk_level: str  # LOW, MEDIUM, HIGH, CRITICAL
+    breakdown: ScoreBreakdown
+    evidence_factors: List[str] = []
 
 class MLAssessment(BaseModel):
-    """Machine learning classification result"""
-    model: str = "tfidf_logistic_regression"
-    classification: str  # "phishing" or "legitimate"
-    confidence_score: float = Field(..., ge=0, le=100)
-    phishing_probability: float = Field(..., ge=0, le=100)
+    model: str = "TF-IDF + LogisticRegression"
+    classification: str = "BENIGN"
+    confidence_score: float = 0.0
+    phishing_probability: float = 0.0
     class_probabilities: Dict[str, float] = {}
 
+class NLPIndicator(BaseModel):
+    category: str
+    matched_phrases: List[str] = []
+    severity: str = "LOW"
 
-class URLIntelligence(BaseModel):
-    """URL analysis results (placeholder for BATCH 2)"""
-    urls_found: List[str] = []
-    suspicious_urls: List[Dict[str, Any]] = []
-    risk_score: int = 0
+class NLPIndicators(BaseModel):
+    score: float = 0.0
+    indicators: List[NLPIndicator] = []
+    detected_intent: List[str] = []
+
+class URLFinding(BaseModel):
+    url: str
+    hostname: str = ""
+    scheme: str = ""
+    is_https: bool = False
+    is_ip_address: bool = False
+    is_shortened: bool = False
+    brand_impersonation: List[str] = []
+    typosquatting_detected: bool = False
+    suspicious_keywords: List[str] = []
+    risk_score: float = 0.0
     risk_level: str = "LOW"
 
+class URLIntelligence(BaseModel):
+    total_urls: int = 0
+    suspicious_urls_count: int = 0
+    extracted_urls: List[URLFinding] = []
+    brand_impersonations: List[str] = []
 
 class DomainIntelligence(BaseModel):
-    """Domain security analysis"""
-    domain: Optional[str] = None
+    domain: str = ""
+    status: str = "available"  # available, unavailable, error
     mx_valid: Optional[bool] = None
-    spf_record: Optional[str] = None
-    dmarc_record: Optional[str] = None
+    spf_record: Optional[Dict[str, Any]] = None
+    dmarc_record: Optional[Dict[str, Any]] = None
     domain_age_days: Optional[int] = None
     risk_flags: List[str] = []
 
-
 class AuthenticationResult(BaseModel):
-    """Email authentication verification (placeholder for BATCH 2)"""
-    spf_status: str = "UNKNOWN"  # PASS, FAIL, NEUTRAL, NONE, UNKNOWN
-    dkim_status: str = "UNKNOWN"
-    dmarc_status: str = "UNKNOWN"
-    authenticated: bool = False
-    anomalies: List[str] = []
-
-
-class NLPIndicator(BaseModel):
-    """NLP-detected social engineering pattern"""
-    category: str
-    matched_phrases: List[str] = []
-    severity: str = "LOW"  # LOW, MEDIUM, HIGH
-
-
-class NLPIndicators(BaseModel):
-    """All NLP indicators for an email"""
-    indicators: List[NLPIndicator] = []
-    total_severity_score: int = 0
-
-
-class ThreatScore(BaseModel):
-    """Deterministic 0-100 threat scoring"""
-    total_score: int = Field(..., ge=0, le=100)
-    risk_level: str  # LOW, MEDIUM, HIGH, CRITICAL
-    breakdown: Dict[str, int] = {}  # Component scores
-    primary_signals: List[str] = []  # Top 3 reasons
-
+    spf_result: str = "UNKNOWN"  # PASS, FAIL, NEUTRAL, NONE, UNKNOWN
+    dkim_result: str = "UNKNOWN"
+    dmarc_result: str = "UNKNOWN"
+    from_reply_to_mismatch: bool = False
+    from_return_path_mismatch: bool = False
+    authentication_anomalies: List[str] = []
 
 class RoutingForensics(BaseModel):
-    """Email routing and infrastructure analysis"""
     origin_ip: Optional[str] = None
-    origin_country: Optional[str] = None
-    origin_provider: Optional[str] = None
     hop_count: int = 0
     unusual_routing: bool = False
     routing_anomalies: List[str] = []
+    origin_country: Optional[str] = None
+    origin_provider: Optional[str] = None
 
+class ThreatInfrastructure(BaseModel):
+    ip: Optional[str] = None
+    asn: Optional[str] = None
+    country: Optional[str] = None
+    isp: Optional[str] = None
+    is_vpn_proxy: bool = False
+    reputation_score: float = 0.0
 
 class AIBriefing(BaseModel):
-    """LLM-generated forensic investigation"""
-    executive_threat_assessment: str = ""
-    attack_vector_identified: str = ""
-    key_evidence: List[str] = []
-    recommended_analyst_action: str = ""
-    confidence_note: str = ""
-    infrastructure_verdict: str = ""
+    executive_threat_assessment: str
+    attack_vector_identified: str
+    key_evidence: List[str]
+    recommended_analyst_action: str
+    confidence_note: str
+    infrastructure_verdict: str
 
-
-class ThreatReport(BaseModel):
-    """Complete threat analysis report"""
-    success: bool
-    error: Optional[str] = None
-    report: Optional[Dict[str, Any]] = None
-
+class ComprehensiveReport(BaseModel):
+    evidence_seal: EvidenceSeal
+    metadata: Metadata
+    threat_score: ThreatScore
+    ml_assessment: MLAssessment
+    nlp_indicators: NLPIndicators
+    url_intelligence: URLIntelligence
+    routing_forensics: RoutingForensics
+    authentication: AuthenticationResult
+    domain_intelligence: DomainIntelligence
+    threat_infrastructure: ThreatInfrastructure
+    ai_investigative_briefing: AIBriefing
 
 class AnalysisResponse(BaseModel):
-    """Full API response for email analysis"""
     success: bool
+    report: Optional[ComprehensiveReport] = None
     error: Optional[str] = None
-    report: Optional[Dict[str, Any]] = None
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "success": True,
-                "report": {
-                    "evidence_seal": {
-                        "sha256_hash": "abc123...",
-                        "byte_size": 1024,
-                        "sealed_at": "2026-08-28T10:30:00Z"
-                    },
-                    "metadata": {
-                        "from_address": "sender@example.com",
-                        "subject": "Test email"
-                    },
-                    "threat_score": {
-                        "total_score": 65,
-                        "risk_level": "HIGH"
-                    }
-                }
-            }
-        }
-
 
 class HealthCheckResponse(BaseModel):
-    """Health check response"""
-    status: str = "healthy"
-    version: str = "2.0.0"
-    modules: Dict[str, str] = {}
-    timestamp: str = ""
+    status: str
+    version: str
+    modules: Dict[str, str]
+    timestamp: str
