@@ -1,194 +1,131 @@
 """
-Email parser for RFC 822 compliant email analysis
-Extracts metadata, headers, body, and attachments from .eml files
+Agentic MX - Email Parser & Evidence Sealer
+Robust parser for raw .eml RFC822 messages and plain text submissions.
+Generates deterministic SHA-256 evidence seals.
 """
 
 import email
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+from email import policy
+from email.parser import BytesParser, Parser
 import hashlib
-from typing import Dict, List, Tuple, Optional
 from datetime import datetime
+from typing import Dict, Any, Tuple, List
 
 
 class EmailParser:
-    """Parse RFC 822 email messages and extract forensic metadata"""
+    def __init__(self):
+        pass
 
-    @staticmethod
-    def parse_email(content: str) -> Dict[str, any]:
+    def hash_email(self, content_str: str) -> Tuple[str, int]:
+        """Generate canonical SHA-256 hash and byte size for raw content."""
+        canonical_bytes = content_str.encode('utf-8')
+        sha256_hash = hashlib.sha256(canonical_bytes).hexdigest()
+        return sha256_hash, len(canonical_bytes)
+
+    def parse_email(self, raw_content: str) -> Dict[str, Any]:
         """
-        Parse email content and extract all relevant fields
-        
-        Args:
-            content: Raw email content as string or bytes
-            
-        Returns:
-            Dictionary with parsed email data
+        Parses raw text or RFC822 email file into a structured dictionary.
         """
-        if isinstance(content, bytes):
-            content = content.decode('utf-8', errors='replace')
+        if not raw_content or not raw_content.strip():
+            return {
+                "success": False,
+                "error": "Empty content provided"
+            }
 
         try:
-            msg = email.message_from_string(content)
+            # Check if this resembles an RFC822 structured email header block
+            if "From:" in raw_content or "Subject:" in raw_content or "Received:" in raw_content:
+                msg = email.message_from_string(raw_content, policy=policy.default)
+                return self._extract_from_msg(msg)
+            else:
+                # Treat as plain text content
+                return {
+                    "success": True,
+                    "from_address": "",
+                    "to_address": "",
+                    "subject": "Plain Text Submission",
+                    "date": datetime.utcnow().isoformat(),
+                    "message_id": "",
+                    "received_count": 0,
+                    "body": raw_content,
+                    "headers": {},
+                    "attachments": [],
+                    "is_multipart": False
+                }
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to parse email: {str(e)}",
-                "raw_content": content[:500]
+                "error": f"Parsing exception: {str(e)}"
             }
 
-        parsed = {
-            "success": True,
-            "headers": dict(msg.items()),
-            "from_address": msg.get("From", ""),
-            "to_address": msg.get("To", ""),
-            "cc_address": msg.get("Cc", ""),
-            "bcc_address": msg.get("Bcc", ""),
-            "subject": msg.get("Subject", ""),
-            "date": msg.get("Date", ""),
-            "message_id": msg.get("Message-ID", ""),
-            "in_reply_to": msg.get("In-Reply-To", ""),
-            "references": msg.get("References", ""),
-            "reply_to": msg.get("Reply-To", ""),
-            "return_path": msg.get("Return-Path", ""),
-            "content_type": msg.get("Content-Type", ""),
-            "mime_version": msg.get("MIME-Version", ""),
-            "user_agent": msg.get("User-Agent", ""),
-            "received_headers": msg.get_all("Received", []),
-            "received_count": len(msg.get_all("Received", [])),
-            "authentication_results": msg.get("Authentication-Results", ""),
-            "body": EmailParser._extract_body(msg),
-            "attachments": EmailParser._extract_attachments(msg),
-            "is_multipart": msg.is_multipart()
-        }
+    def _extract_from_msg(self, msg: email.message.EmailMessage) -> Dict[str, Any]:
+        """Helper to unpack EmailMessage object safely."""
+        from_header = str(msg.get("From", ""))
+        to_header = str(msg.get("To", ""))
+        subject = str(msg.get("Subject", ""))
+        date = str(msg.get("Date", ""))
+        message_id = str(msg.get("Message-ID", ""))
 
-        return parsed
+        headers_dict = {}
+        for key, value in msg.items():
+            if key in headers_dict:
+                if isinstance(headers_dict[key], list):
+                    headers_dict[key].append(str(value))
+                else:
+                    headers_dict[key] = [headers_dict[key], str(value)]
+            else:
+                headers_dict[key] = str(value)
 
-    @staticmethod
-    def _extract_body(msg: email.message.Message) -> str:
-        """Extract plain text body from email message"""
+        received_headers = msg.get_all("Received", [])
+        received_count = len(received_headers) if received_headers else 0
+
         body = ""
-
-        if msg.is_multipart():
-            for part in msg.walk():
-                content_type = part.get_content_type()
-                if content_type == "text/plain":
-                    try:
-                        body = part.get_payload(decode=True)
-                        if isinstance(body, bytes):
-                            body = body.decode('utf-8', errors='replace')
-                        break
-                    except Exception:
-                        continue
-        else:
-            try:
-                body = msg.get_payload(decode=True)
-                if isinstance(body, bytes):
-                    body = body.decode('utf-8', errors='replace')
-            except Exception:
-                body = msg.get_payload()
-
-        return body.strip()
-
-    @staticmethod
-    def _extract_attachments(msg: email.message.Message) -> List[Dict[str, any]]:
-        """Extract attachment metadata from email"""
         attachments = []
 
         if msg.is_multipart():
             for part in msg.walk():
-                filename = part.get_filename()
-                if filename:
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition", ""))
+
+                if "attachment" in content_disposition:
+                    filename = part.get_filename() or "unnamed_attachment"
+                    attachments.append({
+                        "filename": filename,
+                        "content_type": content_type,
+                        "size": len(part.get_payload(decode=True) or b"")
+                    })
+                elif content_type == "text/plain" and not body:
                     try:
-                        payload = part.get_payload(decode=True)
-                        if isinstance(payload, bytes):
-                            file_size = len(payload)
-                            file_hash = hashlib.sha256(payload).hexdigest()
-                        else:
-                            file_size = len(payload)
-                            file_hash = hashlib.sha256(
-                                payload.encode()
-                            ).hexdigest()
-
-                        attachments.append({
-                            "filename": filename,
-                            "content_type": part.get_content_type(),
-                            "size_bytes": file_size,
-                            "sha256_hash": file_hash
-                        })
+                        body = part.get_content()
                     except Exception:
-                        attachments.append({
-                            "filename": filename,
-                            "content_type": part.get_content_type(),
-                            "error": "Could not extract attachment"
-                        })
-
-        return attachments
-
-    @staticmethod
-    def hash_email(content: str) -> Tuple[str, int]:
-        """
-        Generate SHA-256 hash of email content
-        
-        Args:
-            content: Raw email string
-            
-        Returns:
-            Tuple of (hash_hex, byte_size)
-        """
-        if isinstance(content, str):
-            content_bytes = content.encode('utf-8')
+                        body = str(part.get_payload(decode=True).decode('utf-8', errors='replace'))
+                elif content_type == "text/html" and not body:
+                    try:
+                        # Fallback html extraction if plain text is missing
+                        body = part.get_content()
+                    except Exception:
+                        body = str(part.get_payload(decode=True).decode('utf-8', errors='replace'))
         else:
-            content_bytes = content
+            try:
+                body = msg.get_content()
+            except Exception:
+                body = str(msg.get_payload(decode=True or b"").decode('utf-8', errors='replace'))
 
-        hash_obj = hashlib.sha256(content_bytes)
-        return hash_obj.hexdigest(), len(content_bytes)
+        # Extract email address string from 'From' header
+        from_address = from_header
+        if "<" in from_header and ">" in from_header:
+            from_address = from_header.split("<")[1].split(">")[0].strip()
 
-    @staticmethod
-    def extract_headers_dict(parsed_email: Dict) -> Dict[str, str]:
-        """Extract clean header dictionary from parsed email"""
-        headers = parsed_email.get("headers", {})
-        clean_headers = {}
-
-        for key, value in headers.items():
-            if isinstance(value, str):
-                clean_headers[key] = value
-            else:
-                clean_headers[key] = str(value)
-
-        return clean_headers
-
-    @staticmethod
-    def extract_urls(text: str) -> List[str]:
-        """
-        Extract URLs from email body
-        Simple regex-based extraction (will be improved in BATCH 2)
-        
-        Args:
-            text: Email body text
-            
-        Returns:
-            List of URLs found
-        """
-        import re
-
-        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-        urls = re.findall(url_pattern, text)
-        return list(set(urls))  # Remove duplicates
-
-    @staticmethod
-    def extract_email_addresses(text: str) -> List[str]:
-        """
-        Extract email addresses from email body
-        
-        Args:
-            text: Email body text
-            
-        Returns:
-            List of email addresses found
-        """
-        import re
-
-        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-        emails = re.findall(email_pattern, text)
-        return list(set(emails))  # Remove duplicates
+        return {
+            "success": True,
+            "from_address": from_address,
+            "to_address": to_header,
+            "subject": subject,
+            "date": date,
+            "message_id": message_id,
+            "received_count": received_count,
+            "body": body or "",
+            "headers": headers_dict,
+            "attachments": attachments,
+            "is_multipart": msg.is_multipart()
+        }
