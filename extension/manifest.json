@@ -1,25 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Agentic MX - AI Email Threat Hunter",
-  "version": "2.0.0",
-  "description": "Real-time zero-click email threat scoring, BEC detection, and forensics.",
-  "permissions": [
-    "storage"
-  ],
-  "host_permissions": [
-    "https://email-phishing-detector-1-z4wj.onrender.com/*",
-    "https://mail.google.com/*"
-  ],
+  "name": "Agentic MX Phishing Detector",
+  "version": "1.0",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://mail.google.com/*", "http://localhost:8000/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
   "content_scripts": [
     {
       "matches": ["https://mail.google.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "css": ["overlay.css"]
     }
-  ],
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  }
+  ]
 }
