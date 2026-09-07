@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <title>NETRA-Mail Shield</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 300px;
+            margin: 0;
+            padding: 18px;
+            background: #0f172a;
+            color: #f8fafc;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                Arial,
+                sans-serif;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .logo {
+            color: #38bdf8;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 0.4px;
+        }
+
+        .version {
+            color: #64748b;
+            font-size: 9px;
+            margin-top: 2px;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+        }
+
+        .status-dot.on {
+            background: #22c55e;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+        }
+
+        .status-dot.off {
+            background: #ef4444;
+        }
+
+        .main {
+            padding-top: 20px;
+        }
+
+        .description {
+            color: #94a3b8;
+            font-size: 12px;
+            line-height: 1.5;
+            margin-bottom: 20px;
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            padding: 15px;
+
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+        }
+
+        .toggle-title {
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .toggle-subtitle {
+            color: #64748b;
+            font-size: 10px;
+            margin-top: 3px;
+        }
+
+        .switch {
+            position: relative;
+            width: 52px;
+            height: 28px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            inset: 0;
+            cursor: pointer;
+            border-radius: 999px;
+            background: #475569;
+            transition: 0.2s;
+        }
+
+        .slider::before {
+            content: "";
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            left: 3px;
+            top: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+
+        input:checked + .slider {
+            background: #16a34a;
+        }
+
+        input:checked + .slider::before {
+            transform: translateX(24px);
+        }
+
+        .info {
+            margin-top: 15px;
+            padding: 12px;
+
+            border-radius: 10px;
+
+            background: #111827;
+            border: 1px solid #1e293b;
+
+            color: #94a3b8;
+            font-size: 10px;
+            line-height: 1.5;
+        }
+
+        .footer {
+            margin-top: 16px;
+            color: #475569;
+            text-align: center;
+            font-size: 9px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+
+        <div>
+            <div class="logo">
+                NETRA-MAIL SHIELD
+            </div>
+
+            <div class="version">
+                Real-Time Email Protection
+            </div>
+        </div>
+
+        <div class="status">
+
+            <span
+                id="statusDot"
+                class="status-dot"
+            ></span>
+
+            <span id="statusText">
+                OFF
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="main">
+
+        <div class="description">
+
+            NETRA automatically analyzes emails when you open
+            them in Gmail and displays the threat assessment
+            beside the email subject.
+
+        </div>
+
+
+        <div class="toggle-row">
+
+            <div>
+
+                <div class="toggle-title">
+                    Email Protection
+                </div>
+
+                <div class="toggle-subtitle">
+                    Automatically scan Gmail emails
+                </div>
+
+            </div>
+
+
+            <label class="switch">
+
+                <input
+                    type="checkbox"
+                    id="protectionToggle"
+                >
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+        <div class="info">
+
+            <strong>When enabled:</strong><br>
+
+            Open any Gmail email and NETRA will automatically
+            analyze the sender, subject, body, domains and
+            phishing indicators.
+
+            <br><br>
+
+            No manual upload is required.
+
+        </div>
+
+    </div>
+
+
+    <div class="footer">
+        NETRA-Mail Shield • AI Threat Intelligence
+    </div>
+
+
+    <script src="popup.js"></script>
+
+</body>
+</html>

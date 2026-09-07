@@ -1,0 +1,76 @@
+{
+  "project": "NETRA-MAIL",
+  "backend": "http://localhost:8000",
+  "total_tests": 5,
+  "passed_tests": 5,
+  "failed_tests": 0,
+  "prototype_pass_rate": 100.0,
+  "tests": [
+    {
+      "name": "Email 1 - Bank Phishing",
+      "expected_class": "PHISHING",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 2.379,
+      "score": 58.0,
+      "risk": "HIGH",
+      "action": "QUARANTINE",
+      "confidence": 70,
+      "case_id": "NETRA-DA728C0E",
+      "error": null
+    },
+    {
+      "name": "Email 2 - PayPal Phishing",
+      "expected_class": "PHISHING",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 2.223,
+      "score": 99.0,
+      "risk": "CRITICAL",
+      "action": "BLOCK",
+      "confidence": 70,
+      "case_id": "NETRA-B754A2DA",
+      "error": null
+    },
+    {
+      "name": "Email 3 - CEO Fraud / Business Email Compromise",
+      "expected_class": "PHISHING",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 2.317,
+      "score": 56.0,
+      "risk": "HIGH",
+      "action": "QUARANTINE",
+      "confidence": 70,
+      "case_id": "NETRA-2276F898",
+      "error": null
+    },
+    {
+      "name": "Email 4 - Microsoft Credential Phishing",
+      "expected_class": "PHISHING",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 2.193,
+      "score": 100.0,
+      "risk": "CRITICAL",
+      "action": "BLOCK",
+      "confidence": 70,
+      "case_id": "NETRA-9030EB7D",
+      "error": null
+    },
+    {
+      "name": "Email 5 - GitHub Legitimate",
+      "expected_class": "SAFE",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 2.08,
+      "score": 14.0,
+      "risk": "SAFE",
+      "action": "ALLOW",
+      "confidence": 15,
+      "case_id": "NETRA-BDF4F0A1",
+      "error": null
+    }
+  ],
+  "generated_at_epoch": 1787994797.3372865
+}

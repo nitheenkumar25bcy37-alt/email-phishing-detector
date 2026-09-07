@@ -1,0 +1,16 @@
+text,label
+"Meeting moved to 3 PM tomorrow. See you then.",LEGITIMATE
+"Please find the quarterly report attached for review.",LEGITIMATE
+"Lunch meeting confirmed for Friday at noon.",LEGITIMATE
+"Please review the project minutes and action items.",LEGITIMATE
+"The team standup is scheduled for 10 AM tomorrow.",LEGITIMATE
+"Thanks for sending the invoice. We will review it this week.",LEGITIMATE
+"Your account has been suspended. Verify your identity immediately.",PHISHING
+"Urgent payment required. Click the secure link to confirm your bank account.",PHISHING
+"Your password expires today. Login now to prevent account termination.",PHISHING
+"Please process this wire transfer immediately to the new beneficiary.",PHISHING
+"Final notice: confirm your payment information within 24 hours.",PHISHING
+"Your Microsoft account requires security verification. Click here to sign in.",PHISHING
+"Your bank account is blocked. Verify your identity now.",PHISHING
+"Failure to comply will terminate your account. Click here.",PHISHING
+"CEO needs an urgent confidential transfer today.",PHISHING

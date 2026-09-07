@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+
+  "name": "NETRA-Mail Shield",
+
+  "version": "4.0.0",
+
+  "description": "Automatic real-time phishing detection and SOC investigation for Gmail.",
+
+  "permissions": [
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8501/*",
+    "http://localhost:8501/*"
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "NETRA-Mail Shield"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

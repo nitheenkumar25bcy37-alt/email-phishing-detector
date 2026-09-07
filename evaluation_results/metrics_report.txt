@@ -1,0 +1,33 @@
+==============================================================================
+NETRA-MAIL EVALUATION REPORT
+==============================================================================
+
+BACKEND
+  status:  healthy
+  version: 3.0.0
+  mode:    LOCAL
+  model:   True
+
+EMAIL API FUNCTIONAL TEST (5 hand-crafted cases)
+  pass rate: 100.00%
+  latency avg/median/p95: 2.087s / 2.084s / 2.113s
+  NOTE: This is a functional smoke test, not statistical dataset accuracy.
+
+LOCAL ML COMPONENT — 80/20 HOLD-OUT
+  SKIPPED: insufficient labelled data
+
+URL ANALYZER — PHISHTANK vs TRANCO
+  Accuracy            : 67.88%
+  Precision           : 89.11%
+  Recall              : 40.74%
+  F1                  : 55.92%
+  Specificity         : 95.02%
+  False Positive Rate : 4.98%
+  False Negative Rate : 59.26%
+  TP/TN/FP/FN          : 2037/4751/249/2963
+  Best benchmark threshold: risk >= 10
+
+INTERPRETATION
+  Do not claim a final NETRA-Mail email accuracy unless the final API is
+  evaluated on a labelled, previously-unseen email test set.
+  The current 5-email suite is useful for prototype functionality only.

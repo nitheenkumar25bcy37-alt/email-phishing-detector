@@ -1,0 +1,15 @@
+{
+    "total_cases": 5,
+    "correct": 1,
+    "accuracy": 20.0,
+    "precision": 0,
+    "recall": 0,
+    "f1_score": 0,
+    "specificity": 100.0,
+    "true_positive": 0,
+    "true_negative": 1,
+    "false_positive": 0,
+    "false_negative": 0,
+    "actual_phishing": 4,
+    "actual_safe": 1
+}

@@ -1,0 +1,18 @@
+{
+  "dataset": "data\\training_data.csv",
+  "total_rows": 122266,
+  "train_rows": 97812,
+  "test_rows": 24454,
+  "seed": 42,
+  "accuracy": 0.9903492271203075,
+  "precision": 0.9993568097764914,
+  "recall": 0.981987675778164,
+  "f1": 0.9905961109340133,
+  "specificity": 0.9993218040013564,
+  "false_positive_rate": 0.0006781959986436081,
+  "false_negative_rate": 0.018012324221835994,
+  "tp": 12430,
+  "tn": 11788,
+  "fp": 8,
+  "fn": 228
+}

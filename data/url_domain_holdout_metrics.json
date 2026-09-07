@@ -1,0 +1,23 @@
+{
+  "evaluation_type": "domain_grouped_80_20",
+  "dataset": "data\\training_data.csv",
+  "seed": 42,
+  "total_urls": 122264,
+  "total_domains": 69720,
+  "train_urls": 96503,
+  "test_urls": 25761,
+  "train_domains": 55776,
+  "test_domains": 13944,
+  "accuracy": 0.97352587244284,
+  "precision": 0.9996238055827251,
+  "recall": 0.951514717467593,
+  "f1": 0.9749761502898657,
+  "specificity": 0.999576199355823,
+  "false_positive_rate": 0.0004238006441769792,
+  "false_negative_rate": 0.048485282532407074,
+  "tp": 13286,
+  "tn": 11793,
+  "fp": 5,
+  "fn": 677,
+  "mixed_label_domains": 52
+}
