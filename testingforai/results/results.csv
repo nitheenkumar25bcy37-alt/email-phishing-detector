@@ -1,0 +1,25 @@
+﻿id,category,name,expected,note,latency_seconds,http_status,predicted,risk,score,confidence,action,case_id,passed
+1.1,baseline,Misspelled PayPal domain,PHISHING,,2.1066,200,PHISHING,CRITICAL,95.0,70,BLOCK,NETRA-A43EE95A,True
+1.2,baseline,Fake bank password reset,PHISHING,,2.1543,200,PHISHING,HIGH,70.0,46,QUARANTINE,NETRA-61886364,True
+1.3,baseline,Inheritance scam,PHISHING,,2.0811,200,PHISHING,HIGH,55.0,35,QUARANTINE,NETRA-43DCABB1,True
+1.4,baseline,Executable invoice attachment,PHISHING,,2.2246,200,PHISHING,HIGH,50.0,16,QUARANTINE,NETRA-6A5BC306,True
+1.5,baseline,Legitimate bank password reset,SAFE,,2.1683,200,SAFE,LOW,45.0,26,REVIEW,NETRA-B5A1F814,True
+2.1,url_evasion,Long redirect URL,PHISHING,,2.1039,200,PHISHING,CRITICAL,94.0,63,BLOCK,NETRA-ECD6DE8A,True
+2.2,url_evasion,URL shortener,PHISHING,The documented destination is not fetched; this is a static shortener test.,2.0948,200,SAFE,SAFE,15.0,20,ALLOW,NETRA-1C92D617,False
+2.3,url_evasion,Cyrillic homograph,PHISHING,,2.1203,200,PHISHING,HIGH,70.0,37,QUARANTINE,NETRA-27183CDE,True
+2.4,url_evasion,Misleading subdomain,PHISHING,,2.1098,200,PHISHING,HIGH,70.0,35,QUARANTINE,NETRA-3637A87F,True
+2.5,url_evasion,Recently registered domain,PHISHING,The claimed registration date is narrative test metadata; no live WHOIS date is forced.,2.0887,200,PHISHING,CRITICAL,87.0,50,BLOCK,NETRA-E3D70CD2,True
+2.6,url_evasion,HTTPS phishing domain,PHISHING,,2.0741,200,PHISHING,HIGH,55.0,28,QUARANTINE,NETRA-AD9B799D,True
+3.1,html_evasion,Embedded credential form,PHISHING,,2.0864,200,PHISHING,HIGH,70.0,70,QUARANTINE,NETRA-E69F07A4,True
+3.2,html_evasion,JavaScript form redirect,PHISHING,,2.0906,200,PHISHING,HIGH,55.0,37,QUARANTINE,NETRA-B5114470,True
+3.3,html_evasion,Phishing iframe,PHISHING,,2.0786,200,PHISHING,HIGH,70.0,70,QUARANTINE,NETRA-DAAF0369,True
+3.4,html_evasion,Hidden credential form,PHISHING,,2.0743,200,PHISHING,HIGH,70.0,70,QUARANTINE,NETRA-54C711E2,True
+4.1,header_evasion,Failed SPF wire transfer,PHISHING,,2.0656,200,PHISHING,CRITICAL,82.0,70,BLOCK,NETRA-354B9A2C,True
+4.2,header_evasion,Display name spoofing,PHISHING,,2.0354,200,PHISHING,HIGH,70.0,70,QUARANTINE,NETRA-507AAE10,True
+4.3,header_evasion,Reply-To mismatch,PHISHING,,2.0784,200,PHISHING,HIGH,55.0,26,QUARANTINE,NETRA-8EE5E32C,True
+4.4,header_evasion,Legitimate international domain,SAFE,,2.0657,200,SAFE,SAFE,21.0,17,ALLOW,NETRA-D7A81010,True
+5.1,false_positive,Real Chase password reset,SAFE,,2.1901,200,SAFE,LOW,48.0,41,REVIEW,NETRA-C7582AA2,True
+5.2,false_positive,Legitimate GitHub notification,SAFE,,2.1352,200,SAFE,SAFE,12.0,38,ALLOW,NETRA-97942744,True
+5.3,false_positive,Internal maintenance alert,SAFE,,2.0953,200,SAFE,LOW,34.0,20,REVIEW,NETRA-F47F749A,True
+5.4,false_positive,Legitimate eBay marketplace email,SAFE,,2.1161,200,SAFE,SAFE,14.0,40,ALLOW,NETRA-EB3616C9,True
+5.5,false_positive,Legitimate TechCrunch newsletter,SAFE,,2.125,200,SAFE,SAFE,12.0,37,ALLOW,NETRA-FF0F168F,True

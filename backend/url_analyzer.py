@@ -598,6 +598,39 @@ class URLAnalyzer:
             if x
         ]
 
+        explicit_phishing_terms = {
+            "phishing",
+            "phish",
+            "fake",
+            "credential-steal",
+        }
+        if any(term in hostname for term in explicit_phishing_terms):
+            result["risk_score"] += 40
+            result["risk_reasons"].append(
+                "Hostname contains an explicit phishing or fake-site indicator"
+            )
+
+        registered_domain = cls._base_domain(hostname)
+        registered_labels = set(registered_domain.split("."))
+        subdomain_labels = set()
+        for label in labels[:-2]:
+            subdomain_labels.update(
+                token for token in re.split(r"[._-]+", label) if token
+            )
+        misleading_terms = {
+            "bank", "banking", "login", "secure", "verify", "account", "paypal",
+            "microsoft", "google", "apple", "amazon",
+        }
+        misleading_subdomain_terms = sorted(
+            subdomain_labels & misleading_terms
+        )
+        if misleading_subdomain_terms and not (subdomain_labels & registered_labels):
+            result["suspicious_keywords"].append("misleading_subdomain")
+            result["risk_score"] += 25
+            result["risk_reasons"].append(
+                "Brand or account language appears in a subdomain, not the registered domain"
+            )
+
         result["subdomain_count"] = max(
             0,
             len(labels) - 2
@@ -718,6 +751,9 @@ class URLAnalyzer:
             for keyword in cls.KEYWORDS
             if keyword in target
         )
+
+        if misleading_subdomain_terms:
+            keywords.append("misleading_subdomain")
 
         if keywords:
 

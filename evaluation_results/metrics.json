@@ -9,8 +9,8 @@
     "ledger": {
       "status": "INTEGRAL",
       "valid": true,
-      "total_records": 79,
-      "latest_hash": "711d21b184db22397853353dd7dc4d6bb73a66272168c7eaae2267dfcc0040fa",
+      "total_records": 96,
+      "latest_hash": "dccfdb0f85fbc44303dbee5dcac29a8c08f283f2dd47121a370975505cdcac38",
       "database": "C:\\Users\\ASUS\\Downloads\\email-phishing-detector-main (5)\\email-phishing-detector-main\\backend\\forensic_ledger.db"
     }
   },
@@ -27,9 +27,9 @@
     "specificity": 1.0,
     "false_positive_rate": 0.0,
     "false_negative_rate": 0.0,
-    "average_latency_seconds": 2.08724,
-    "median_latency_seconds": 2.0841,
-    "p95_latency_seconds": 2.1134399999999998,
+    "average_latency_seconds": 2.09744,
+    "median_latency_seconds": 2.0838,
+    "p95_latency_seconds": 2.1346800000000004,
     "functional_pass_rate": 1.0,
     "warning": "Only 5 hand-crafted emails; do NOT present this as dataset accuracy."
   },

@@ -1,0 +1,11 @@
+From: support@fake-paypal.com
+To: test-user@example.com
+Subject: Account Verification
+Date: Tue, 08 Sep 2026 10:00:00 +0000
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Verify: http://paypal-verify.com/confirm?redirect=3Dhttp%3A%2F%2Fverify-accou=
+nt.fake-bank.com%2Flogin&session=3Dabc123&timestamp=3D2026-09-08T10:00:00Z&tr=
+acking=3Dxyz789

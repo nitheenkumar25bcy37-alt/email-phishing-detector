@@ -33,6 +33,7 @@ import uuid
 
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from html.parser import HTMLParser
 from typing import Any, Dict, List
 
 import uvicorn
@@ -55,6 +56,7 @@ from pydantic import BaseModel
 try:
 
     from backend.compliance import IndiaPrivacyPreserver
+    from backend.attachment_analyzer import AttachmentAnalyzer
 
     from backend.config import (
         APP_VERSION,
@@ -87,6 +89,7 @@ try:
 except ImportError:
 
     from compliance import IndiaPrivacyPreserver
+    from attachment_analyzer import AttachmentAnalyzer
 
     from config import (
         APP_VERSION,
@@ -253,6 +256,26 @@ def _combine_email_text(
     ).strip()
 
 
+class _VisibleTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_data(self, data):
+        if data and data.strip():
+            self.parts.append(data.strip())
+
+
+def _visible_html_text(html: str) -> str:
+    parser = _VisibleTextParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+        return " ".join(parser.parts)
+    except Exception:
+        return re.sub(r"<[^>]+>", " ", html or "")
+
+
 def _safe_text_from_parsed(
     parsed: Dict[str, Any],
 ) -> str:
@@ -287,10 +310,7 @@ def _safe_text_from_parsed(
             )
         ),
         html=str(
-            body.get(
-                "html",
-                "",
-            )
+            _visible_html_text(body.get("html", ""))
         ),
     )
 
@@ -526,22 +546,30 @@ def _build_nlp_result(
             )
         )
 
-    urgency = get_category(
+    raw_categories = raw.get("categories", raw)
+    if not isinstance(raw_categories, dict):
+        raw_categories = {}
+
+    def get_raw_category(primary: str, alternate: str):
+        value = raw_categories.get(primary, raw_categories.get(alternate, []))
+        return value if isinstance(value, list) else []
+
+    urgency = get_raw_category(
         "urgency",
         "urgency_cues",
     )
 
-    financial = get_category(
+    financial = get_raw_category(
         "financial_fraud",
         "financial_fraud_cues",
     )
 
-    credentials = get_category(
+    credentials = get_raw_category(
         "credential_harvesting",
         "credential_harvesting_cues",
     )
 
-    social = get_category(
+    social = get_raw_category(
         "social_engineering",
         "social_engineering_cues",
     )
@@ -601,6 +629,18 @@ def _build_nlp_result(
             100,
             score,
         )
+
+    normalized_text = text.lower()
+    legitimate_reset_context = (
+        "if you did not request" in normalized_text
+        or "if you didn't request" in normalized_text
+        or "if this was not you" in normalized_text
+        or "if this wasn't you" in normalized_text
+        or "if not, ignore" in normalized_text
+        or "please ignore this email" in normalized_text
+    )
+    if legitimate_reset_context and not financial:
+        score = min(score, 24)
 
     attack_classification = []
 
@@ -1214,6 +1254,33 @@ def _build_url_result(
                     or not urls
                 ):
 
+                    if os.getenv("NETRA_EXPAND_SHORT_URLS", "0") == "1":
+                        from backend.url_expander import URLExpander
+
+                        expansions = []
+                        for item in result.get("urls", []):
+                            if not item.get("is_shortener"):
+                                continue
+                            expansion = URLExpander.expand(item.get("url", ""))
+                            expansions.append(expansion)
+                            final_url = expansion.get("final_url", "")
+                            if expansion.get("expanded") and final_url:
+                                final_analysis = URLAnalyzer.analyze_url(final_url)
+                                item["expanded_url"] = final_url
+                                item["redirect_chain"] = expansion.get("redirect_chain", [])
+                                item["expanded_analysis"] = final_analysis
+                                item["risk_score"] = max(
+                                    item.get("risk_score", 0),
+                                    final_analysis.get("risk_score", 0),
+                                )
+                            else:
+                                item["expansion_error"] = expansion.get("error", "not_expanded")
+                        result["url_expansions"] = expansions
+                        if expansions:
+                            result["summary"]["reasons"].append(
+                                "Shortened URL expansion was attempted with bounded HEAD requests"
+                            )
+
                     return result
 
         except Exception:
@@ -1744,6 +1811,7 @@ def _run_threat_scoring(
     ml: Dict[str, Any],
     domain: Dict[str, Any],
     infrastructure: Dict[str, Any],
+    attachments: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
 
     evaluate = getattr(
@@ -1803,6 +1871,9 @@ def _run_threat_scoring(
 
                 infrastructure=
                     infrastructure,
+
+                attachment_res=
+                    attachments or {},
 
             )
 
@@ -2357,6 +2428,10 @@ async def _analyze_parsed_email(
         True,
     )
 
+    attachment_analysis = AttachmentAnalyzer.analyze(
+        parsed.get("attachments", []) or []
+    )
+
     (
         nlp,
         ml,
@@ -2401,6 +2476,9 @@ async def _analyze_parsed_email(
         infrastructure=
             infrastructure,
 
+        attachments=
+            attachment_analysis,
+
     )
 
     scoring = scoring or {}
@@ -2435,6 +2513,15 @@ async def _analyze_parsed_email(
     )
 
     decision = decision or {}
+
+    attachment_reasons = []
+    for finding in attachment_analysis.get("attachments", []):
+        attachment_reasons.extend(finding.get("reasons", []))
+    if attachment_reasons:
+        decision["reasons"] = list(dict.fromkeys(
+            list(decision.get("reasons", []))
+            + attachment_reasons
+        ))
 
     # ------------------------------------------------------------
     # REDACTIONS
@@ -2622,6 +2709,9 @@ async def _analyze_parsed_email(
 
         "infrastructure":
             infrastructure,
+
+        "attachments":
+            attachment_analysis,
 
         "evidence":
             evidence,
@@ -2901,6 +2991,9 @@ async def _analyze_parsed_email(
                 "attachments",
                 [],
             ),
+
+        "attachment_analysis":
+            attachment_analysis,
 
         "network_chain":
             parsed.get(

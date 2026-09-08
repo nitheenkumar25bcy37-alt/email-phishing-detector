@@ -32,6 +32,7 @@ class ThreatScoringEngine:
         "url": 0.10,
         "authentication": 0.10,
         "infrastructure": 0.05,
+        "attachments": 0.10,
     }
 
     # ---------------------------------------------------------
@@ -600,6 +601,7 @@ class ThreatScoringEngine:
         ml_res: Any = None,
         domain_res: Dict[str, Any] = None,
         infrastructure: Dict[str, Any] = None,
+        attachment_res: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
 
         # -----------------------------------------------------
@@ -672,6 +674,10 @@ class ThreatScoringEngine:
             )
         )
 
+        attachment_score = cls._clamp(
+            (attachment_res or {}).get("score", 0)
+        )
+
         # -----------------------------------------------------
         # Weighted base score
         # -----------------------------------------------------
@@ -695,6 +701,8 @@ class ThreatScoringEngine:
 
             + infrastructure_score
             * cls.WEIGHTS["infrastructure"]
+            + attachment_score
+            * cls.WEIGHTS["attachments"]
         )
 
         # -----------------------------------------------------
@@ -978,6 +986,23 @@ class ThreatScoringEngine:
                 "with financial activity."
             )
 
+        suspicious_attachments = int(
+            (attachment_res or {}).get("suspicious_attachment_count", 0) or 0
+        )
+
+        if suspicious_attachments:
+            bonuses.append(
+                f"{suspicious_attachments} suspicious attachment(s) detected."
+            )
+
+        if attachment_score >= 50 and (
+            nlp_score >= 25 or domain_score >= 30 or url_score >= 30
+        ):
+            bonus_score += 15
+            bonuses.append(
+                "Suspicious attachment corroborates independent phishing evidence."
+            )
+
         # -----------------------------------------------------
         # Safety floor
         # -----------------------------------------------------
@@ -990,6 +1015,13 @@ class ThreatScoringEngine:
                 url_score >= 50,
                 authentication_score >= 20,
                 infrastructure_score >= 30,
+                attachment_score >= 35,
+                bool(
+                    (header_res or {}).get("alignment", {}).get(
+                        "has_mismatch", False
+                    )
+                    and (ml_score >= 50 or nlp_score >= 15)
+                ),
             ]
         )
 
@@ -1047,6 +1079,42 @@ class ThreatScoringEngine:
             bonuses.append(
                 "Strong NLP phishing evidence raised "
                 "the minimum threat level."
+            )
+
+        # Executables and macro-enabled files are high-risk content. Keep
+        # the floor bounded so an otherwise empty message is reviewable,
+        # while avoiding an unconditional critical verdict.
+        if attachment_score >= 50 and score < 50:
+            score = 50
+            bonuses.append(
+                "High-risk attachment raised the minimum threat level."
+            )
+
+        if (
+            (header_res or {}).get("alignment", {}).get("has_mismatch", False)
+            and (ml_score >= 50 or nlp_score >= 15)
+            and score < 55
+        ):
+            score = 55
+            bonuses.append(
+                "Reply-To or return-path mismatch corroborates phishing evidence."
+            )
+
+        url_reasons = (url_res or {}).get("summary", {}).get("reasons", [])
+        explicit_phishing_hostname = any(
+            "explicit phishing or fake-site" in str(reason).lower()
+            for reason in url_reasons
+        )
+        if explicit_phishing_hostname and score < 55:
+            score = 55
+            bonuses.append(
+                "Explicit phishing hostname raised the minimum threat level."
+            )
+
+        if url_score >= 40 and nlp_score >= 30 and score < 55:
+            score = 55
+            bonuses.append(
+                "Suspicious URL and content indicators agree."
             )
 
         # Strong BEC pattern.
@@ -1175,6 +1243,7 @@ class ThreatScoringEngine:
             "url": url_score,
             "authentication": authentication_score,
             "infrastructure": infrastructure_score,
+            "attachments": attachment_score,
         }
 
         weighted_contributions = {
@@ -1211,6 +1280,12 @@ class ThreatScoringEngine:
             "infrastructure": round(
                 infrastructure_score
                 * cls.WEIGHTS["infrastructure"],
+                2,
+            ),
+
+            "attachments": round(
+                attachment_score
+                * cls.WEIGHTS["attachments"],
                 2,
             ),
         }

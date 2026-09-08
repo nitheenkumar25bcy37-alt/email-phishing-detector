@@ -1,0 +1,9 @@
+From: noreply@paypal-secure.com
+To: test-user@example.com
+Subject: Account Verification
+Date: Tue, 08 Sep 2026 10:00:00 +0000
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Verify: https://paypal-secure.com/verify-now

@@ -11,12 +11,12 @@
       "expected_class": "PHISHING",
       "passed": true,
       "http_status": 200,
-      "elapsed_seconds": 2.379,
-      "score": 58.0,
+      "elapsed_seconds": 2.393,
+      "score": 61.0,
       "risk": "HIGH",
       "action": "QUARANTINE",
       "confidence": 70,
-      "case_id": "NETRA-DA728C0E",
+      "case_id": "NETRA-A231D436",
       "error": null
     },
     {
@@ -24,12 +24,12 @@
       "expected_class": "PHISHING",
       "passed": true,
       "http_status": 200,
-      "elapsed_seconds": 2.223,
-      "score": 99.0,
+      "elapsed_seconds": 2.27,
+      "score": 100.0,
       "risk": "CRITICAL",
       "action": "BLOCK",
       "confidence": 70,
-      "case_id": "NETRA-B754A2DA",
+      "case_id": "NETRA-9D6E132A",
       "error": null
     },
     {
@@ -37,12 +37,12 @@
       "expected_class": "PHISHING",
       "passed": true,
       "http_status": 200,
-      "elapsed_seconds": 2.317,
+      "elapsed_seconds": 2.443,
       "score": 56.0,
       "risk": "HIGH",
       "action": "QUARANTINE",
       "confidence": 70,
-      "case_id": "NETRA-2276F898",
+      "case_id": "NETRA-B43E6DA9",
       "error": null
     },
     {
@@ -50,12 +50,12 @@
       "expected_class": "PHISHING",
       "passed": true,
       "http_status": 200,
-      "elapsed_seconds": 2.193,
+      "elapsed_seconds": 2.353,
       "score": 100.0,
       "risk": "CRITICAL",
       "action": "BLOCK",
       "confidence": 70,
-      "case_id": "NETRA-9030EB7D",
+      "case_id": "NETRA-34D27CE0",
       "error": null
     },
     {
@@ -63,14 +63,14 @@
       "expected_class": "SAFE",
       "passed": true,
       "http_status": 200,
-      "elapsed_seconds": 2.08,
+      "elapsed_seconds": 2.176,
       "score": 14.0,
       "risk": "SAFE",
       "action": "ALLOW",
-      "confidence": 15,
-      "case_id": "NETRA-BDF4F0A1",
+      "confidence": 16,
+      "case_id": "NETRA-A014E5BB",
       "error": null
     }
   ],
-  "generated_at_epoch": 1787994797.3372865
+  "generated_at_epoch": 1788850835.5840366
 }

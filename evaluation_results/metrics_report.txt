@@ -10,7 +10,7 @@ BACKEND
 
 EMAIL API FUNCTIONAL TEST (5 hand-crafted cases)
   pass rate: 100.00%
-  latency avg/median/p95: 2.087s / 2.084s / 2.113s
+  latency avg/median/p95: 2.097s / 2.084s / 2.135s
   NOTE: This is a functional smoke test, not statistical dataset accuracy.
 
 LOCAL ML COMPONENT — 80/20 HOLD-OUT

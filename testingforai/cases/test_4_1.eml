@@ -1,0 +1,10 @@
+From: cfo@company.com
+To: test-user@example.com
+Subject: Urgent Wire Transfer Needed
+Date: Tue, 08 Sep 2026 10:00:00 +0000
+Authentication-Results: example; spf=fail; dkim=none; dmarc=none
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Please wire $50,000 to the account below. This is urgent and confidential.
