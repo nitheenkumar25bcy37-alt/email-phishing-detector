@@ -1,144 +1,236 @@
-import streamlit as st
-import sqlite3
-import json
+from __future__ import annotations
+
 import os
-import folium
-from streamlit_folium import st_folium
-import requests
+import sys
+from typing import Any, Dict
 
-st.set_page_config(
-    page_title="Agentic MX | SOC Investigation Platform",
-    page_icon="🛡️",
-    layout="wide"
-)
+import streamlit as st
 
-st.title("🛡️ Agentic MX — Digital Forensics & Threat Intelligence")
-st.markdown("Automated RFC 822 Email Forensics, ML Classification & Chain-of-Custody Vault")
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from dashboard.api_client import APIClient
 
-# --- Helper Functions ---
-def get_report_by_hash(evidence_hash: str):
-    db_path = os.path.join("data", "evidence", "threat_logs.db")
-    if not os.path.exists(db_path):
-        return None
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT forensic_data FROM chain_of_custody WHERE evidence_hash = ? LIMIT 1", (evidence_hash,))
-    row = cursor.fetchone()
-    conn.close()
-    return json.loads(row[0]) if row else None
 
-def get_latest_report():
-    db_path = os.path.join("data", "evidence", "threat_logs.db")
-    if not os.path.exists(db_path):
-        return None
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT forensic_data FROM chain_of_custody ORDER BY id DESC LIMIT 1")
-    row = cursor.fetchone()
-    conn.close()
-    return json.loads(row[0]) if row else None
+st.set_page_config(page_title="NETRA-Mail Investigation", page_icon="N", layout="wide")
 
-def render_forensic_report(report):
-    meta = report.get("metadata", {})
-    score_data = report.get("threat_score", {})
-    score = score_data.get("score", 0)
-    risk_level = score_data.get("risk_level", "LOW")
-    ml = report.get("ml_assessment", {})
-    infra = report.get("threat_infrastructure", {})
-    geo = infra.get("geolocation") or {}
-    domain = infra.get("domain_intelligence") or {}
-    evidence = report.get("evidence_seal", {})
-    ai_brief = report.get("ai_investigative_briefing", {})
-    nlp_cues = report.get("nlp_indicators", {})
+client = APIClient()
+st.markdown("""
+<style>
+:root { color-scheme: dark; }
+.block-container { padding-top: 2rem; max-width: 1400px; }
+[data-testid="stMetric"] { background: #172033; border: 1px solid #2a3a53; padding: 12px; }
+</style>
+""", unsafe_allow_html=True)
 
-    st.success("✅ **Live Webmail Incident Loaded Automatically via Cryptographic Seal**")
-    
-    # 1. Metric Row
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        color = "red" if score >= 60 else "orange" if score >= 40 else "green"
-        st.metric("Threat Score", f"{score}/100", delta=risk_level, delta_color="inverse")
-    with c2:
-        st.metric("ML Classification", ml.get("ml_classification", "N/A"), f"{ml.get('confidence_score', 0)}% Conf.")
-    with c3:
-        st.metric("Origin Country", geo.get("country", "Unknown"), geo.get("asn", "Local/Direct"))
-    with c4:
-        st.metric("Domain Status", "Suspicious" if domain.get("is_newly_registered") else "Active", f"Risk Flags: {len(domain.get('risk_flags', []))}")
 
-    st.divider()
+def safe_call(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs), None
+    except Exception as exc:
+        return None, str(exc)
 
-    # 2. Tabs for Deep Analysis
-    t1, t2, t3, t4 = st.tabs(["📋 Executive Summary & AI Brief", "🌍 GeoIP & Infrastructure", "🔍 NLP & Social Engineering", "🔐 Evidence & Chain-of-Custody"])
 
-    with t1:
-        st.subheader("Executive Incident Briefing")
-        st.markdown(f"**Subject:** `{meta.get('subject', 'N/A')}`")
-        st.markdown(f"**From:** `{meta.get('from', 'N/A')}`")
-        if ai_brief:
-            st.info(f"**Executive Threat Assessment:**\n\n{ai_brief.get('executive_threat_assessment', 'No assessment available.')}")
-            st.warning(f"**Attack Vector Identified:** {ai_brief.get('attack_vector_identified', 'N/A')}")
-            st.markdown(f"**Remediation Recommendation:** {ai_brief.get('recommended_analyst_action', 'N/A')}")
+def risk_color(score: int) -> str:
+    return "#ef4444" if score >= 75 else "#f59e0b" if score >= 50 else "#22c55e"
 
-    with t2:
-        st.subheader("Origin Infrastructure & Geolocation")
-        lat = geo.get("latitude")
-        lon = geo.get("longitude")
-        if lat and lon:
-            m = folium.Map(location=[lat, lon], zoom_start=4)
-            folium.Marker(
-                [lat, lon],
-                popup=f"Origin IP: {geo.get('ip')}<br>ASN: {geo.get('asn')}",
-                icon=folium.Icon(color="red" if geo.get("is_cloud_vps") else "blue", icon="shield")
-            ).add_to(m)
-            st_folium(m, height=350, width=700)
-        else:
-            st.info("Direct webmail injection without upstream IP hops.")
 
-    with t3:
-        st.subheader("Extracted Social Engineering & Urgency Cues")
-        for category, cues in nlp_cues.items():
-            if cues:
-                st.write(f"**{category.replace('_', ' ').title()}:**")
-                for cue in cues:
-                    st.code(cue, language="text")
+def render_finding(finding: Dict[str, Any]):
+    severity = str(finding.get("severity", "unknown")).upper()
+    st.markdown(f"**{finding.get('title', 'Finding')}**  ·  `{severity}`  ·  confidence `{float(finding.get('confidence', 0)):.0%}`")
+    st.write(finding.get("description", "No explanation available."))
+    with st.expander("Evidence and limitations"):
+        st.json({"evidence": finding.get("evidence", {}), "limitations": finding.get("limitations", [])})
 
-    with t4:
-        st.subheader("Cryptographic Evidence Vault & Chain-of-Custody")
-        st.json({
-            "evidence_seal": evidence,
-            "forensic_report": report
-        })
-        st.download_button(
-            "📥 Download Forensic Dossier (JSON)",
-            data=json.dumps(report, indent=2),
-            file_name=f"dossier_{evidence.get('sha256_hash', 'evidence')[:10]}.json",
-            mime="application/json"
-        )
 
-# --- Routing Logic ---
-query_hash = st.query_params.get("hash")
-report_to_display = None
-
-if query_hash:
-    report_to_display = get_report_by_hash(query_hash)
-
-# Fallback: Check if user uploaded a file manually
-if not report_to_display:
-    st.sidebar.header("Manual Inspection")
-    uploaded_file = st.sidebar.file_uploader("Upload .EML File for Analysis", type=["eml", "txt"])
-    if uploaded_file:
-        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "message/rfc822")}
-        res = requests.post("http://127.0.0.1:8000/api/v1/analyze/file", files=files)
-        if res.status_code == 200:
-            report_to_display = res.json().get("report")
-
-if report_to_display:
-    render_forensic_report(report_to_display)
-else:
-    # If opened directly with no query param and no file, show latest activity
-    latest = get_latest_report()
-    if latest:
-        st.info("Displaying most recent incident recorded by Agentic MX:")
-        render_forensic_report(latest)
+def render_overview():
+    st.title("NETRA-Mail Investigation Platform")
+    st.caption("Detect, explain, trace, correlate, preserve, report")
+    summary, error = safe_call(client.summary)
+    if error:
+        st.error(f"Backend unavailable: {error}")
+        st.info("Start the FastAPI backend and confirm the configured API URL.")
+        return
+    cols = st.columns(5)
+    for column, label, value in zip(cols, ("Analyzed emails", "Critical", "High risk", "Open cases", "Suspected campaigns"), (summary.get("total_emails", 0), summary.get("critical_emails", 0), summary.get("high_risk_emails", 0), summary.get("open_cases", 0), summary.get("suspected_campaigns", 0))):
+        column.metric(label, value)
+    st.subheader("Provider and integrity status")
+    st.json({"provider_status": summary.get("provider_status", {}), "integrity_warnings": summary.get("integrity_warnings", 0), "limitations": summary.get("limitations", [])})
+    st.subheader("Recent analyses")
+    data, error = safe_call(client.emails, 10, 0)
+    if error:
+        st.warning(error)
     else:
-        st.info("No active threat loaded. Open an email in Gmail or upload a .eml file on the sidebar.")
+        for item in data.get("items", []):
+            score = int(item.get("risk_score", 0))
+            st.markdown(f"`{item.get('email_id')}`  **{item.get('classification', 'Unknown')}**  · score **{score}/100**")
+
+
+def render_email(email_id: str):
+    result, error = safe_call(client.email, email_id)
+    if error:
+        st.error(error)
+        return
+    findings, findings_error = safe_call(client.findings, email_id)
+    trace, trace_error = safe_call(client.trace, email_id)
+    relationships, relation_error = safe_call(client.relationships, email_id)
+    st.title("Email Investigation")
+    st.caption(email_id)
+    score = int(result.get("risk_score", 0))
+    st.markdown(f"<h2 style='color:{risk_color(score)}'>{result.get('classification', 'Unknown')} · {score}/100</h2>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Confidence", f"{float(result.get('confidence', 0)):.0%}")
+    c2.metric("Evidence hash", str(result.get("evidence", {}).get("sha256", "Unavailable"))[:18] + "...")
+    c3.metric("Analysis version", result.get("evidence", {}).get("analysis_version", "Unknown"))
+    tabs = st.tabs(["Findings", "Origin trace", "Relationships", "Limitations"])
+    with tabs[0]:
+        if findings_error:
+            st.error(findings_error)
+        elif not findings.get("findings"):
+            st.info("No structured findings were returned.")
+        else:
+            for finding in findings["findings"]:
+                render_finding(finding)
+    with tabs[1]:
+        if trace_error:
+            st.error(trace_error)
+        else:
+            for index, hop in enumerate(trace.get("hops", []), 1):
+                st.markdown(f"**Hop {index}**  `{hop.get('source_hostname') or 'Unknown'}` -> `{hop.get('destination_hostname') or 'Unknown'}`")
+                st.caption(f"IP: {hop.get('source_ip') or 'Unknown'} · classification: {', '.join(hop.get('ip_classifications', [])) or 'Unknown'} · timestamp: {hop.get('timestamp') or 'Unavailable'}")
+            st.subheader("Origin candidates")
+            for candidate in trace.get("origin_candidates", []):
+                st.write(f"`{candidate.get('ip')}` · confidence `{float(candidate.get('confidence', 0)):.0%}` · {', '.join(candidate.get('basis', []))}")
+            st.info("Geolocation is infrastructure intelligence and does not prove the sender's physical location.")
+            st.json({"limitations": trace.get("limitations", [])})
+    with tabs[2]:
+        if relation_error:
+            st.error(relation_error)
+        elif not relationships.get("relationships"):
+            st.info("No stored relationships for this email.")
+        else:
+            for relationship in relationships["relationships"]:
+                st.markdown(f"**{relationship.get('relationship_type')}** · confidence `{float(relationship.get('confidence', 0)):.0%}`")
+                st.json({"evidence": relationship.get("evidence", []), "limitations": relationship.get("limitations", [])})
+    with tabs[3]:
+        st.json(result.get("limitations", ["Not enough evidence."]))
+
+
+def render_cases():
+    st.title("Cases")
+    with st.expander("Create case"):
+        with st.form("create_case"):
+            title = st.text_input("Title")
+            description = st.text_area("Description")
+            severity = st.selectbox("Severity", ["low", "medium", "high", "critical"])
+            priority = st.selectbox("Priority", ["low", "normal", "high", "urgent"])
+            if st.form_submit_button("Create case"):
+                created, create_error = safe_call(client.create_case, {"title": title, "description": description, "severity": severity, "priority": priority})
+                if create_error:
+                    st.error(create_error)
+                else:
+                    st.success(f"Created {created.get('case_id')}")
+    data, error = safe_call(client.cases)
+    if error:
+        st.error(error)
+        return
+    cases = data.get("cases", [])
+    if not cases:
+        st.info("No persisted cases.")
+        return
+    for case in cases:
+        with st.expander(f"{case.get('case_id')} · {case.get('title')} · {case.get('status')} / {case.get('severity')}"):
+            st.write(case.get("description", ""))
+            st.json({"emails": case.get("email_ids", []), "campaigns": case.get("campaign_ids", []), "tags": case.get("tags", []), "notes": case.get("notes", [])})
+            new_status = st.selectbox("Status", ["open", "investigating", "contained", "resolved", "closed", "false_positive"], index=["open", "investigating", "contained", "resolved", "closed", "false_positive"].index(case.get("status", "open")), key=f"status_{case['case_id']}")
+            if st.button("Save status", key=f"save_{case['case_id']}"):
+                updated, update_error = safe_call(client.update_case, case["case_id"], {"status": new_status})
+                if update_error:
+                    st.error(update_error)
+                else:
+                    st.success(f"Case updated to {updated.get('status')}")
+            note = st.text_input("Add analyst note", key=f"note_{case['case_id']}")
+            if st.button("Add note", key=f"add_note_{case['case_id']}") and note:
+                _, note_error = safe_call(client.add_note, case["case_id"], note)
+                st.error(note_error) if note_error else st.success("Note added")
+            tag = st.text_input("Add tag", key=f"tag_{case['case_id']}")
+            if st.button("Add tag", key=f"add_tag_{case['case_id']}") and tag:
+                _, tag_error = safe_call(client.add_tag, case["case_id"], tag)
+                st.error(tag_error) if tag_error else st.success("Tag added")
+            evidence, evidence_error = safe_call(client.case_evidence, case["case_id"])
+            if evidence_error:
+                st.warning(evidence_error)
+            else:
+                st.subheader("Evidence")
+                st.dataframe([{key: item.get(key) for key in ("evidence_id", "evidence_type", "filename", "sha256", "integrity_status")} for item in evidence.get("evidence", [])], use_container_width=True)
+                for item in evidence.get("evidence", []):
+                    if st.button(f"Verify {item.get('evidence_id')}", key=f"verify_{item.get('evidence_id')}"):
+                        verification, verification_error = safe_call(client.evidence_verify, item["evidence_id"])
+                        if verification_error:
+                            st.error(verification_error)
+                        else:
+                            st.json(verification)
+            timeline, timeline_error = safe_call(client.case_timeline, case["case_id"])
+            if not timeline_error:
+                st.subheader("Timeline")
+                for event in timeline.get("timeline", []):
+                    st.write(f"`{event.get('created_at')}` · {event.get('description')}")
+
+
+def render_campaigns():
+    st.title("Campaigns")
+    data, error = safe_call(client.campaigns)
+    if error:
+        st.error(error)
+        return
+    campaigns = data.get("campaigns", [])
+    for campaign in campaigns:
+        with st.expander(f"{campaign.get('name')} · {campaign.get('status')} · {float(campaign.get('confidence', 0)):.0%}"):
+            st.write(campaign.get("description", ""))
+            st.write("Related email IDs:", ", ".join(campaign.get("email_ids", [])) or "Unavailable")
+            st.caption("Campaign relationships show shared evidence and require analyst confirmation; they do not identify an attacker.")
+
+
+def render_reports():
+    st.title("Reports")
+    case_id = st.text_input("Case ID")
+    if not case_id:
+        st.info("Enter a case ID to view and generate reports.")
+        return
+    reports, error = safe_call(client.reports, case_id)
+    if error:
+        st.error(error)
+        return
+    st.json(reports)
+    format_choice = st.selectbox("Generate format", ["json", "html", "pdf"])
+    if st.button("Generate report"):
+        generated, generation_error = safe_call(client.create_report, case_id, format_choice)
+        if generation_error:
+            st.error(generation_error)
+        else:
+            st.success(f"Report created: {generated.get('report_id')}")
+            st.json({key: generated.get(key) for key in ("report_id", "format", "evidence_count", "integrity_verified", "limitations")})
+
+
+def main():
+    page = st.sidebar.radio("Navigate", ["Overview", "Email analysis", "Campaigns", "Cases", "Reports"])
+    st.sidebar.caption(f"API: {client.base_url}")
+    if page == "Overview":
+        render_overview()
+    elif page == "Email analysis":
+        data, error = safe_call(client.emails, 100, 0)
+        if error:
+            st.error(error)
+            return
+        email_ids = [item.get("email_id") for item in data.get("items", [])]
+        selected = st.selectbox("Select analyzed email", email_ids or ["No analyses available"])
+        if email_ids:
+            render_email(selected)
+    elif page == "Campaigns":
+        render_campaigns()
+    elif page == "Cases":
+        render_cases()
+    else:
+        render_reports()
+
+
+if __name__ == "__main__":
+    main()

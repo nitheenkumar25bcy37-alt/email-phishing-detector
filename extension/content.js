@@ -46,11 +46,21 @@ function loadProtectionState() {
 
                 return;
             }
-
-            scheduleScan();
         }
     );
 }
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type !== "NETRA_ANALYZE_CURRENT_EMAIL") {
+        return;
+    }
+    if (!protectionEnabled) {
+        sendResponse({ok: false, error: "Enable Email Protection first."});
+        return;
+    }
+    scanCurrentEmail(true).then((result) => sendResponse({ok: Boolean(result), result: result || null, error: result ? null : "Open a Gmail message before analyzing."}));
+    return true;
+});
 
 
 // ============================================================
@@ -79,7 +89,7 @@ chrome.storage.onChanged.addListener(
             return;
         }
 
-        scheduleScan();
+            removeNetraUI();
     }
 );
 
@@ -97,12 +107,6 @@ loadProtectionState();
 
 const observer =
     new MutationObserver(() => {
-
-        if (!protectionEnabled) {
-            return;
-        }
-
-        scheduleScan();
     });
 
 
@@ -329,7 +333,7 @@ function getCurrentEmail() {
 // SCAN
 // ============================================================
 
-async function scanCurrentEmail() {
+async function scanCurrentEmail(force = false) {
 
     if (
         !protectionEnabled ||
@@ -352,9 +356,7 @@ async function scanCurrentEmail() {
             email.body
         );
 
-    if (
-        lastEmailKey === emailKey
-    ) {
+    if (!force && lastEmailKey === emailKey) {
         return;
     }
 
@@ -396,7 +398,7 @@ async function scanCurrentEmail() {
 
         const response =
             await fetch(
-                `${API_BASE_URL}/api/v1/analyze/text`,
+                `${API_BASE_URL}/api/v2/emails/analyze`,
                 {
                     method: "POST",
 
@@ -442,7 +444,7 @@ async function scanCurrentEmail() {
         await sleep(150);
 
 
-        const result =
+            const result =
             normalizeResult(
                 data
             );
@@ -470,6 +472,8 @@ async function scanCurrentEmail() {
             email.subjectEl,
             result
         );
+
+            return result;
 
 
     } catch (error) {
@@ -502,6 +506,17 @@ function normalizeResult(
 
     if (!data) {
         return null;
+    }
+
+    if (data.risk_score !== undefined || data.classification) {
+        return {
+            score: Number(data.risk_score || 0),
+            risk: String(data.classification || "UNKNOWN").toUpperCase(),
+            action: Number(data.risk_score || 0) >= 75 ? "BLOCK" : Number(data.risk_score || 0) >= 50 ? "QUARANTINE" : "REVIEW",
+            confidence: Number(data.confidence || 0) * 100,
+            caseId: data.email_id || "",
+            findingCount: Array.isArray(data.findings) ? data.findings.length : 0
+        };
     }
 
 

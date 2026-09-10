@@ -1,0 +1,1 @@
+"""Structured API schemas."""

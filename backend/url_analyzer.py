@@ -1541,3 +1541,55 @@ class URLAnalyzer:
             },
 
         }
+
+    # ============================================================
+    # STRUCTURED V2 FINDINGS
+    # ============================================================
+
+    @classmethod
+    def analyze_references(cls, references):
+        """Analyze parsed visible/href references without fetching remote URLs."""
+        from uuid import uuid4
+        from urllib.parse import urlparse
+
+        findings = []
+        results = []
+        for reference in references or []:
+            href = str(reference.get("href", "") or reference.get("normalized", ""))
+            if not href or href.lower().startswith(("javascript:", "data:", "mailto:")):
+                continue
+            result = cls.analyze_url(href)
+            parsed = urlparse(href)
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                continue
+            hostname = (parsed.hostname or "").lower()
+            visible = str(reference.get("visible_text", ""))
+            visible_host = (urlparse(visible).hostname or "").lower() if "://" in visible else ""
+            result["registered_domain"] = cls._base_domain(hostname)
+            result["port"] = parsed.port
+            result["path"] = parsed.path
+            result["query_parameters"] = sorted({item.split("=", 1)[0] for item in parsed.query.split("&") if item})
+            result["encoded_characters"] = result.get("encoded_character_count", 0)
+            result["redirect_indicators"] = [item for item in result.get("suspicious_parameters", []) if item in {"redirect", "url", "return", "continue"}]
+            result["visible_text"] = visible
+            result["href"] = href
+            result["visible_host"] = visible_host
+            result["visible_href_mismatch"] = bool(visible_host and visible_host != hostname)
+            result["mixed_script"] = any(ord(char) > 127 for char in hostname) and "xn--" not in hostname
+            results.append(result)
+            if result.get("visible_href_mismatch"):
+                findings.append({"finding_id": str(uuid4()), "category": "URL", "rule": "visible_href_mismatch", "severity": "high", "confidence": 0.94, "title": "Visible link destination differs from href", "description": "The visible link text points to a different host than the actual href.", "evidence": {"visible_host": visible_host, "actual_host": hostname, "href": href}, "limitations": ["A mismatch can also be caused by intentionally shortened or redirected links."]})
+            rules = []
+            if result.get("is_shortener"):
+                rules.append(("url_shortener", "medium", 0.88, "URL shortener detected", "The destination is obscured behind a known URL shortening service."))
+            if result.get("punycode") or result.get("mixed_script"):
+                rules.append(("idn_or_mixed_script", "high", 0.91, "Internationalized or mixed-script hostname detected", "The hostname uses IDN, punycode, or non-ASCII characters that can resemble another domain."))
+            if result.get("is_ip_address"):
+                rules.append(("ip_based_url", "medium", 0.86, "URL uses an IP address", "The link uses a raw IP address instead of a registered domain."))
+            if result.get("port_present") or parsed.port not in (None, 80, 443):
+                rules.append(("suspicious_port", "medium", 0.8, "URL uses a non-standard port", "The URL specifies a port outside the normal HTTP or HTTPS ports."))
+            if result.get("risk_score", 0) >= 50:
+                rules.append(("suspicious_url_features", "high", 0.82, "Suspicious URL characteristics detected", "The URL contains multiple credential, brand, redirect, or infrastructure signals."))
+            for rule, severity, confidence, title, description in rules:
+                findings.append({"finding_id": str(uuid4()), "category": "URL", "rule": rule, "severity": severity, "confidence": confidence, "title": title, "description": description, "evidence": {"url": href, "hostname": hostname, "registered_domain": result.get("registered_domain"), "risk_score": result.get("risk_score", 0), "risk_reasons": result.get("risk_reasons", [])[:10]}, "limitations": ["No remote URL was fetched; redirect chains and live reputation are not inferred."]})
+        return {"urls": results, "findings": findings, "highest_risk": max((item.get("risk_score", 0) for item in results), default=0), "redirect_chain": [], "network_fetch_performed": False}

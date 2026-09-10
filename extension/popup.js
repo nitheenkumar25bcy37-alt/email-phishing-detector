@@ -1,6 +1,8 @@
 const toggle = document.getElementById("protectionToggle");
 const statusText = document.getElementById("statusText");
 const statusDot = document.getElementById("statusDot");
+const analyzeButton = document.getElementById("analyzeButton");
+const result = document.getElementById("result");
 
 
 // ============================================================
@@ -10,6 +12,7 @@ const statusDot = document.getElementById("statusDot");
 function updateUI(enabled) {
 
     toggle.checked = enabled;
+    analyzeButton.disabled = !enabled;
 
     if (enabled) {
 
@@ -65,3 +68,24 @@ toggle.addEventListener(
         );
     }
 );
+
+analyzeButton.addEventListener("click", async () => {
+    result.textContent = "Requesting the current Gmail message...";
+    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    if (!tab?.id) {
+        result.textContent = "No active tab is available.";
+        return;
+    }
+    chrome.tabs.sendMessage(tab.id, {type: "NETRA_ANALYZE_CURRENT_EMAIL"}, (response) => {
+        if (chrome.runtime.lastError) {
+            result.textContent = "Open a Gmail message before analyzing.";
+            return;
+        }
+        if (!response?.ok) {
+            result.textContent = response?.error || "Email content is unavailable.";
+            return;
+        }
+        const data = response.result || {};
+        result.textContent = `Score ${data.score ?? "Unavailable"}/100 · ${data.risk || "Unknown"}. Full details are shown in Gmail.`;
+    });
+});
