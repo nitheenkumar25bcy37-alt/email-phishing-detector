@@ -1,0 +1,28 @@
+From: ceo@example.com
+To: finance@example.com
+Subject: URGENT Invoice Payment
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============4901992508256810736=="
+
+--===============4901992508256810736==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+URGENT.
+
+Please process the attached invoice immediately.
+
+Verify your account here:
+http://login-security-example.xyz/verify
+
+Do not contact anyone else regarding this request.
+
+--===============4901992508256810736==
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice.pdf.exe"
+MIME-Version: 1.0
+
+TVpIYXJtbGVzcyBtaXhlZC1hdHRhY2sgdGVzdC4=
+
+--===============4901992508256810736==--

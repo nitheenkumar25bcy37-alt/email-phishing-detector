@@ -1,0 +1,11 @@
+From: support@example.com
+To: employee@example.com
+Subject: Security Verification Required
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Please verify your account immediately:
+http://login-paypal-security-example.xyz/verify/account
+
+Your account may be restricted if verification is not completed.

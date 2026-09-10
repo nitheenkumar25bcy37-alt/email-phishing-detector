@@ -1,0 +1,21 @@
+From: attacker@example.com
+To: user@example.com
+Subject: Invoice Document
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============2759105336306816314=="
+
+--===============2759105336306816314==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please find the invoice attached.
+
+--===============2759105336306816314==
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice.exe"
+MIME-Version: 1.0
+
+TVpUaGlzIGlzIGEgaGFybWxlc3MgdGVzdCBmaWxlLg==
+
+--===============2759105336306816314==--

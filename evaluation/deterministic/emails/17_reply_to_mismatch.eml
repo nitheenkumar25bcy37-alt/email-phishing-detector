@@ -1,0 +1,9 @@
+From: ceo@example.com
+To: finance@example.com
+Reply-To: attacker-mailbox@external-example.net
+Subject: finance@example.com
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Confidential Request

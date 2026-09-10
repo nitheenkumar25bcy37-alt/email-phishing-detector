@@ -1,23 +1,23 @@
-# Virtual Environment
-venv/
-.venv/
-env/
-ENV/
+# Runtime forensic evidence
+backend/data/evidence/
 
-# Python cache & artifacts
+# Temporary test emails
+attachment_test.eml
+oversized_test.eml
+
+# Python cache
 __pycache__/
 *.py[cod]
-*$py.class
-*.joblib
 
-# Secrets & Environment variables
+# Virtual environments
+venv/
+.venv/
+
+# Environment secrets
 .env
+.env.*
 
-# Local Databases & Logs
+# Local databases
 *.db
-data/evidence/*.db
-*.log
-
-# Streamlit & OS artifacts
-.streamlit/
-.DS_Store
+*.sqlite
+*.sqlite3

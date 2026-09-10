@@ -1,0 +1,21 @@
+From: billing@example.com
+To: user@example.com
+Subject: Invoice Attached
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============6768310383864648779=="
+
+--===============6768310383864648779==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please open the attached invoice document.
+
+--===============6768310383864648779==
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice.pdf.exe"
+MIME-Version: 1.0
+
+TVpIYXJtbGVzcyB0ZXN0IHBheWxvYWQu
+
+--===============6768310383864648779==--

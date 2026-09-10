@@ -1,0 +1,21 @@
+From: reports@example.com
+To: employee@example.com
+Subject: Quarterly Report
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============7024732464523073309=="
+
+--===============7024732464523073309==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please see the attached report.
+
+--===============7024732464523073309==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="report.pdf"
+MIME-Version: 1.0
+
+TVpUaGlzIGlzIGludGVudGlvbmFsbHkgbWlzbWF0Y2hlZCBoYXJtbGVzcyB0ZXN0IGRhdGEu
+
+--===============7024732464523073309==--

@@ -1,0 +1,9 @@
+From: unknown
+To: user@example.com
+Subject: Action Required
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+This message intentionally contains unusual formatting and incomplete-looking=
+ headers for parser robustness testing.

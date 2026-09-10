@@ -1,0 +1,15 @@
+From: admin@example.com
+To: employee@example.com
+Subject: URGENT: Account Suspension
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+URGENT ACTION REQUIRED.
+
+Your account will be suspended within 24 hours.
+
+Click here to confirm your identity:
+http://account-verification-example.com/login
+
+Enter your username, password and security code.

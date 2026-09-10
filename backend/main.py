@@ -27,6 +27,7 @@ Run from project root:
 import asyncio
 import hashlib
 import inspect
+import ipaddress
 import os
 import re
 import uuid
@@ -76,6 +77,7 @@ try:
         MAX_TEXT_SIZE_BYTES,
         RATE_LIMIT_REQUESTS,
         RATE_LIMIT_WINDOW_SECONDS,
+        RATE_LIMIT_MAX_KEYS,
     )
 
     from backend.database import ForensicLedgerDB
@@ -122,6 +124,7 @@ except ImportError:
         MAX_TEXT_SIZE_BYTES,
         RATE_LIMIT_REQUESTS,
         RATE_LIMIT_WINDOW_SECONDS,
+        RATE_LIMIT_MAX_KEYS,
     )
 
     from database import ForensicLedgerDB
@@ -151,6 +154,42 @@ except ImportError:
         from evidence import create_evidence_seal
     except Exception:
         create_evidence_seal = None
+
+
+# ================================================================
+# REQUEST RATE LIMITING
+# ================================================================
+
+rate_limiter = RequestRateLimiter(
+    limit=RATE_LIMIT_REQUESTS,
+    window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+    max_keys=RATE_LIMIT_MAX_KEYS,
+)
+
+
+def _client_rate_limit_key(request: Request) -> str:
+    """Return a stable client key without trusting forwarded headers."""
+    client = request.client
+    if client and client.host:
+        return f"ip:{client.host}"
+    return "anonymous"
+
+
+def _enforce_rate_limit(request: Request) -> None:
+    """Reject clients that exceed the configured analysis request limit."""
+    key = _client_rate_limit_key(request)
+    if rate_limiter.allow(key):
+        return
+
+    raise HTTPException(
+        status_code=429,
+        detail=(
+            "Rate limit exceeded. "
+            f"Maximum {RATE_LIMIT_REQUESTS} requests are allowed "
+            f"per {RATE_LIMIT_WINDOW_SECONDS} seconds."
+        ),
+        headers={"Retry-After": str(RATE_LIMIT_WINDOW_SECONDS)},
+    )
 
 
 # ================================================================
@@ -990,6 +1029,82 @@ def _build_ml_result(
 # DOMAIN INTELLIGENCE
 # ================================================================
 
+def _normalize_internal_domain_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep private/loopback IPs out of ordinary domain intelligence.
+
+    URL analysis is the authoritative detector for SSRF-style destinations;
+    domain intelligence should classify these hosts consistently instead of
+    treating 127.0.0.1 (or another special IP) as a normal resolving domain.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    domains = result.get("domains", [])
+    if not isinstance(domains, list):
+        return result
+
+    highest = 0
+    global_reasons = list(result.get("reasons", []) or [])
+
+    for item in domains:
+        if not isinstance(item, dict):
+            continue
+        host = str(item.get("domain", "")).strip().strip("[]")
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+
+        item["is_ip_address"] = True
+        item["is_private_ip"] = addr.is_private
+        item["is_loopback"] = addr.is_loopback
+        item["is_link_local"] = addr.is_link_local
+        item["is_reserved_ip"] = addr.is_reserved
+        item["is_multicast"] = addr.is_multicast
+        item["is_unspecified_ip"] = addr.is_unspecified
+        item["registered_domain"] = host
+
+        special = (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_reserved
+            or addr.is_multicast
+            or addr.is_unspecified
+        )
+        if special:
+            item["risk_score"] = max(_normalize_score(item.get("risk_score", 0)), 80)
+            item["risk_level"] = "CRITICAL"
+            item["resolves"] = False
+            item["resolved_ip"] = None
+            reasons = list(item.get("reasons", []) or [])
+            reason = "Special-use/private IP destination; not a public domain."
+            if reason not in reasons:
+                reasons.append(reason)
+            item["reasons"] = reasons
+            if reason not in global_reasons:
+                global_reasons.append(reason)
+            highest = max(highest, 80)
+        else:
+            highest = max(highest, _normalize_score(item.get("risk_score", 0)))
+
+    if highest >= 70:
+        result["highest_risk_score"] = highest
+        result["overall_risk"] = "CRITICAL"
+    elif highest >= 50:
+        result["highest_risk_score"] = highest
+        result["overall_risk"] = "HIGH"
+    elif highest >= 30:
+        result["highest_risk_score"] = highest
+        result["overall_risk"] = "MEDIUM"
+    else:
+        result["highest_risk_score"] = highest
+        result["overall_risk"] = "LOW"
+
+    result["reasons"] = global_reasons
+    return result
+
+
 def _build_domain_result(
     parsed: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -1020,7 +1135,7 @@ def _build_domain_result(
                 dict,
             ):
 
-                return result
+                return _normalize_internal_domain_result(result)
 
         except Exception:
 
@@ -1915,6 +2030,117 @@ def _create_seal(
 # THREAT SCORING
 # ================================================================
 
+def _apply_ssrf_scoring_override(
+    result: Dict[str, Any],
+    url: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Promote explicit internal-destination URL findings into the verdict.
+
+    A weighted average can otherwise dilute a critical SSRF signal (for
+    example ML=48 + URL=79 produced only 20/100). An explicit loopback/private
+    destination is therefore treated as a strong independent security signal.
+    """
+    if not isinstance(result, dict) or not isinstance(url, dict):
+        return result
+
+    urls = url.get("urls", []) or []
+    ssrf_items = []
+    for item in urls:
+        analysis = item.get("analysis", item) if isinstance(item, dict) else {}
+        if isinstance(analysis, dict) and analysis.get("ssrf_risk"):
+            ssrf_items.append(analysis)
+
+    if not ssrf_items:
+        return result
+
+    highest = max(_normalize_score(x.get("risk_score", 0)) for x in ssrf_items)
+    # Explicit special-use destination: do not allow a low weighted average
+    # to classify the message as SAFE.
+    floor = 75 if highest >= 70 else 60
+    current = _normalize_score(result.get("threat_score", result.get("score", 0)))
+    final_score = max(current, floor)
+
+    findings = list(result.get("correlation_findings", []) or [])
+    finding = "Internal/private URL destination detected; SSRF-style targeting signal."
+    if finding not in findings:
+        findings.append(finding)
+
+    classifications = list(result.get("attack_classification", []) or [])
+    if "SSRF / internal resource targeting" not in classifications:
+        classifications.append("SSRF / internal resource targeting")
+
+    result["threat_score"] = final_score
+    result["score"] = final_score
+    result["severity"] = "CRITICAL" if final_score >= 75 else "HIGH"
+    result["risk_level"] = result["severity"]
+    result["correlation_bonus"] = max(_normalize_score(result.get("correlation_bonus", 0)), 40)
+    result["correlation_findings"] = findings
+    result["attack_classification"] = classifications
+    result["active_strong_signals"] = max(_normalize_score(result.get("active_strong_signals", 0)), 1)
+
+    # Confidence should reflect that the strong signal is explicit, not just
+    # an averaged heuristic. Keep existing confidence if it is already high.
+    result["confidence"] = max(_normalize_score(result.get("confidence", 0)), 85)
+    return result
+
+
+def _apply_attachment_scoring_override(
+    result: Dict[str, Any],
+    attachments: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Ensure high-confidence static attachment findings affect the verdict.
+
+    Keeps the normal weighted engine, but prevents a dangerous executable or
+    macro attachment from being diluted into a SAFE result. Attachments are
+    analyzed statically only; no file is executed.
+    """
+    if not isinstance(result, dict) or not isinstance(attachments, dict):
+        return result
+
+    highest = _normalize_score(attachments.get("score", 0))
+    if highest <= 0:
+        return result
+
+    current = _normalize_score(result.get("threat_score", result.get("score", 0)))
+    # Critical/high-risk attachment evidence is an independent strong signal.
+    if highest >= 90:
+        floor = 80
+    elif highest >= 75:
+        floor = 75
+    elif highest >= 50:
+        floor = 55
+    else:
+        floor = 35
+
+    final_score = max(current, floor if attachments.get("suspicious_attachment_count", 0) else current)
+    result["threat_score"] = final_score
+    result["score"] = final_score
+    result["severity"] = (
+        "CRITICAL" if final_score >= 75 else
+        "HIGH" if final_score >= 50 else
+        "MEDIUM" if final_score >= 25 else "SAFE"
+    )
+    result["risk_level"] = result["severity"]
+
+    findings = list(result.get("correlation_findings", []) or [])
+    for finding in attachments.get("findings", []) or []:
+        if finding not in findings:
+            findings.append(finding)
+    result["correlation_findings"] = findings
+
+    classifications = list(result.get("attack_classification", []) or [])
+    if highest >= 75 and "Malware Delivery / Dangerous Attachment" not in classifications:
+        classifications.append("Malware Delivery / Dangerous Attachment")
+    result["attack_classification"] = classifications
+    result["active_strong_signals"] = max(
+        _normalize_score(result.get("active_strong_signals", 0)),
+        1 if highest >= 35 else 0,
+    )
+    if highest >= 75:
+        result["confidence"] = max(_normalize_score(result.get("confidence", 0)), 85)
+    return result
+
+
 def _run_threat_scoring(
     authentication: Dict[str, Any],
     url: Dict[str, Any],
@@ -1993,7 +2219,7 @@ def _run_threat_scoring(
                 dict,
             ):
 
-                return result
+                return _apply_ssrf_scoring_override(result, url)
 
     except Exception:
 
@@ -2050,7 +2276,7 @@ def _run_threat_scoring(
             dict,
         ):
 
-            return result
+            return _apply_ssrf_scoring_override(result, url)
 
     except Exception:
 
@@ -2089,7 +2315,7 @@ def _run_threat_scoring(
             dict,
         ):
 
-            return result
+            return _apply_ssrf_scoring_override(result, url)
 
     except Exception as exc:
 
@@ -2132,6 +2358,166 @@ def _run_threat_scoring(
 # ================================================================
 # DECISION ENGINE
 # ================================================================
+
+def _apply_ssrf_decision_override(
+    decision: Dict[str, Any],
+    scoring: Dict[str, Any],
+    url: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Ensure the final action cannot downgrade an explicit SSRF signal."""
+    decision = decision if isinstance(decision, dict) else {}
+    urls = url.get("urls", []) if isinstance(url, dict) else []
+    has_ssrf = any(
+        isinstance(item, dict)
+        and (item.get("analysis", item) or {}).get("ssrf_risk")
+        for item in (urls or [])
+    )
+    if not has_ssrf:
+        return decision
+
+    decision["risk"] = "CRITICAL"
+    decision["score"] = max(
+        _normalize_score(decision.get("score", 0)),
+        _normalize_score(scoring.get("threat_score", scoring.get("score", 0))),
+        75,
+    )
+    decision["action"] = "BLOCK"
+    decision["confidence"] = max(_normalize_score(decision.get("confidence", 0)), 85)
+    reasons = list(decision.get("reasons", []) or [])
+    reason = "Internal/private URL destination detected; possible SSRF-style targeting."
+    if reason not in reasons:
+        reasons.insert(0, reason)
+    decision["reasons"] = reasons
+    classifications = list(decision.get("attack_classification", []) or [])
+    if "SSRF / internal resource targeting" not in classifications:
+        classifications.append("SSRF / internal resource targeting")
+    decision["attack_classification"] = classifications
+    return decision
+
+
+def _apply_attachment_scoring_signal(
+    scoring: Dict[str, Any],
+    attachments: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Ensure static attachment evidence is not diluted by the weighted engine."""
+    if not isinstance(scoring, dict) or not isinstance(attachments, dict):
+        return scoring
+
+    attachment_score = _normalize_score(attachments.get("score", 0))
+    current = _normalize_score(scoring.get("threat_score", scoring.get("score", 0)))
+
+    if attachment_score <= 0:
+        return scoring
+
+    # Archives and MIME anomalies are meaningful even when they are not
+    # individually enough to justify a BLOCK. Never let the weighted engine
+    # erase an explicit static finding.
+    if attachment_score >= 40:
+        final_score = max(current, attachment_score)
+        scoring["threat_score"] = final_score
+        scoring["score"] = final_score
+        if final_score >= 75:
+            scoring["severity"] = "CRITICAL"
+        elif final_score >= 50:
+            scoring["severity"] = "HIGH"
+        elif final_score >= 25:
+            scoring["severity"] = "LOW"
+        else:
+            scoring["severity"] = "SAFE"
+        scoring["risk_level"] = scoring["severity"]
+        scoring["attachment_signal"] = attachment_score
+        scoring["active_strong_signals"] = max(
+            _normalize_score(scoring.get("active_strong_signals", 0)),
+            1,
+        )
+        scoring["confidence"] = max(
+            _normalize_score(scoring.get("confidence", 0)),
+            65 if attachment_score < 75 else 85,
+        )
+    return scoring
+
+
+def _apply_reply_to_signal(
+    decision: Dict[str, Any],
+    scoring: Dict[str, Any],
+    authentication: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Surface From/Reply-To domain mismatch as a contextual impersonation signal."""
+    if not isinstance(decision, dict) or not isinstance(authentication, dict):
+        return decision
+
+    alignment = authentication.get("alignment", {})
+    if not isinstance(alignment, dict):
+        return decision
+
+    from_domain = str(alignment.get("from_domain") or "").lower()
+    reply_domain = str(alignment.get("reply_to_domain") or "").lower()
+    mismatch = bool(alignment.get("has_mismatch")) and bool(from_domain and reply_domain)
+
+    if not mismatch or from_domain == reply_domain:
+        return decision
+
+    current = _normalize_score(decision.get("score", 0))
+    score = max(current, _normalize_score(scoring.get("threat_score", 0)), 40)
+    # Do not automatically BLOCK solely for Reply-To mismatch: legitimate
+    # mailing systems can use a different Reply-To domain. Keep it contextual.
+    if score < 50:
+        decision["risk"] = "LOW"
+        decision["risk_level"] = "LOW"
+        decision["action"] = "REVIEW"
+    decision["score"] = score
+    decision["confidence"] = max(_normalize_score(decision.get("confidence", 0)), 70)
+
+    reasons = list(decision.get("reasons", []) or [])
+    reason = f"From/Reply-To domain mismatch: {from_domain} -> {reply_domain}."
+    if reason not in reasons:
+        reasons.insert(0, reason)
+    decision["reasons"] = reasons
+
+    classifications = list(decision.get("attack_classification", []) or [])
+    label = "Reply-To mismatch / possible impersonation"
+    if label not in classifications:
+        classifications.append(label)
+    decision["attack_classification"] = classifications
+    return decision
+
+
+def _apply_attachment_decision_override(
+    decision: Dict[str, Any],
+    scoring: Dict[str, Any],
+    attachments: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Promote high-confidence static attachment evidence into the final verdict."""
+    if not isinstance(decision, dict) or not isinstance(attachments, dict):
+        return decision
+
+    highest = _normalize_score(attachments.get("score", 0))
+    suspicious = _normalize_score(attachments.get("suspicious_attachment_count", 0))
+    if highest < 75 or suspicious <= 0:
+        return decision
+
+    decision["risk"] = "CRITICAL"
+    decision["risk_level"] = "CRITICAL"
+    decision["score"] = max(
+        _normalize_score(decision.get("score", 0)),
+        _normalize_score(scoring.get("threat_score", scoring.get("score", 0))),
+        75,
+    )
+    decision["action"] = "BLOCK"
+    decision["confidence"] = max(_normalize_score(decision.get("confidence", 0)), 85)
+
+    reasons = list(decision.get("reasons", []) or [])
+    reason = "High-risk attachment detected by static analysis; possible malware delivery."
+    if reason not in reasons:
+        reasons.insert(0, reason)
+    decision["reasons"] = reasons
+
+    classifications = list(decision.get("attack_classification", []) or [])
+    if "Malware Delivery / Dangerous Attachment" not in classifications:
+        classifications.append("Malware Delivery / Dangerous Attachment")
+    decision["attack_classification"] = classifications
+    return decision
+
 
 def _run_decision_engine(
     scoring: Dict[str, Any],
@@ -2593,6 +2979,10 @@ async def _analyze_parsed_email(
     )
 
     scoring = scoring or {}
+    scoring = _apply_attachment_scoring_signal(
+        scoring,
+        attachment_analysis,
+    )
 
     # ------------------------------------------------------------
     # DECISION
@@ -2624,6 +3014,21 @@ async def _analyze_parsed_email(
     )
 
     decision = decision or {}
+    decision = _apply_ssrf_decision_override(
+        decision,
+        scoring,
+        url,
+    )
+    decision = _apply_attachment_decision_override(
+        decision,
+        scoring,
+        attachment_analysis,
+    )
+    decision = _apply_reply_to_signal(
+        decision,
+        scoring,
+        authentication,
+    )
 
     attachment_reasons = []
     for finding in attachment_analysis.get("attachments", []):
@@ -2762,6 +3167,36 @@ async def _analyze_parsed_email(
         else:
 
             severity = "SAFE"
+
+    # ------------------------------------------------------------
+    # FINAL VERDICT SYNCHRONIZATION
+    # ------------------------------------------------------------
+    # Decision overrides (SSRF / dangerous attachments) are authoritative.
+    # Propagate the canonical final verdict back into the scoring object so
+    # every API surface reports the same score/severity/confidence.
+    canonical_score = max(
+        threat_score,
+        _normalize_score(decision.get("score", 0)),
+    )
+    canonical_confidence = max(
+        _normalize_score(scoring.get("confidence", 0)),
+        _normalize_score(decision.get("confidence", 0)),
+    )
+    canonical_risk = severity
+
+    scoring["threat_score"] = canonical_score
+    scoring["score"] = canonical_score
+    scoring["severity"] = canonical_risk
+    scoring["risk_level"] = canonical_risk
+    scoring["confidence"] = canonical_confidence
+
+    # Keep the decision synchronized as well.
+    decision["score"] = canonical_score
+    decision["risk"] = canonical_risk
+    decision["risk_level"] = canonical_risk
+    decision["confidence"] = canonical_confidence
+
+    threat_score = canonical_score
 
     # ------------------------------------------------------------
     # AI EXPLANATION
@@ -3253,90 +3688,96 @@ async def root():
 
 @app.get("/health")
 async def health():
-
-    # ------------------------------------------------------------
-    # ML MODEL
-    # ------------------------------------------------------------
-
+    """Liveness endpoint: confirms the API process is running."""
     try:
-
-        model_path = getattr(
-            LocalMLClassifier,
-            "MODEL_PATH",
-            None,
-        )
-
-        if hasattr(
-            model_path,
-            "exists",
-        ):
-
-            model_available = (
-                model_path.exists()
-            )
-
+        model_path = getattr(LocalMLClassifier, "MODEL_PATH", None)
+        if hasattr(model_path, "exists"):
+            model_available = bool(model_path.exists())
         else:
-
-            model_available = bool(
-                model_path
-                and os.path.exists(
-                    str(model_path)
-                )
-            )
-
+            model_available = bool(model_path and os.path.exists(str(model_path)))
     except Exception:
-
         model_available = False
 
-    # ------------------------------------------------------------
-    # LEDGER
-    # ------------------------------------------------------------
-
     try:
-
-        ledger = (
-            db.verify_chain_integrity()
-        )
-
+        ledger = db.verify_chain_integrity()
     except Exception as exc:
-
-        ledger = {
-
-            "status":
-                "ERROR",
-
-            "valid":
-                False,
-
-            "error":
-                type(exc).__name__,
-
-        }
+        ledger = {"status": "ERROR", "valid": False, "error": type(exc).__name__}
 
     return {
-
-        "status":
-            "healthy",
-
-        "version":
-            str(APP_VERSION),
-
-        "mode":
-            "LOCAL",
-
-        "extension_api":
-            True,
-
-        "soc_api":
-            True,
-
-        "model_available":
-            model_available,
-
-        "ledger":
-            ledger,
-
+        "status": "healthy",
+        "version": str(APP_VERSION),
+        "mode": "LOCAL",
+        "extension_api": True,
+        "soc_api": True,
+        "model_available": model_available,
+        "ledger": ledger,
     }
+
+
+@app.get("/ready")
+async def readiness():
+    """Readiness endpoint: verifies core dependencies are usable."""
+    checks: Dict[str, Any] = {}
+
+    try:
+        checks["configuration"] = {
+            "ok": bool(APP_VERSION and MAX_EMAIL_SIZE_BYTES > 0 and MAX_EVIDENCE_SIZE_BYTES > 0),
+            "version": str(APP_VERSION),
+        }
+    except Exception as exc:
+        checks["configuration"] = {"ok": False, "error": type(exc).__name__}
+
+    try:
+        model_path = getattr(LocalMLClassifier, "MODEL_PATH", None)
+        model_ok = bool(model_path and os.path.exists(str(model_path)))
+        checks["ml_model"] = {"ok": model_ok, "available": model_ok}
+    except Exception as exc:
+        checks["ml_model"] = {"ok": False, "error": type(exc).__name__}
+
+    try:
+        ledger = db.verify_chain_integrity()
+        ledger_ok = bool(ledger.get("valid", False)) and ledger.get("status") not in {"ERROR", "CORRUPT"}
+        checks["forensic_ledger"] = {
+            "ok": ledger_ok,
+            "status": ledger.get("status"),
+            "valid": ledger.get("valid"),
+            "total_records": ledger.get("total_records"),
+        }
+    except Exception as exc:
+        checks["forensic_ledger"] = {"ok": False, "error": type(exc).__name__}
+
+    storage_paths = {
+        "evidence_storage": EVIDENCE_STORAGE_DIR,
+        "database_parent": os.path.dirname(str(DATABASE_PATH)) or ".",
+    }
+    storage_ok = True
+    storage_details = {}
+    for name, raw_path in storage_paths.items():
+        path = os.path.abspath(str(raw_path))
+        exists = os.path.isdir(path)
+        storage_details[name] = {"ok": exists, "path": path}
+        storage_ok = storage_ok and exists
+    checks["storage"] = {"ok": storage_ok, "paths": storage_details}
+
+    components_ok = all(
+        component is not None
+        for component in (parser, db, campaign_service, case_service, evidence_service, report_service)
+    )
+    checks["core_components"] = {"ok": components_ok}
+
+    ready = all(bool(item.get("ok")) for item in checks.values())
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        "version": str(APP_VERSION),
+        "mode": "LOCAL",
+        "checks": checks,
+    }
+
+    if not ready:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content=payload)
+
+    return payload
 
 
 # ================================================================
@@ -3347,8 +3788,11 @@ async def health():
     "/api/v1/analyze/eml"
 )
 async def analyze_eml_file(
+    request: Request,
     file: UploadFile = File(...),
 ):
+
+    _enforce_rate_limit(request)
 
     if not file.filename:
 
@@ -3475,8 +3919,11 @@ async def analyze_eml_file(
     "/api/v1/analyze/email"
 )
 async def analyze_direct_email(
+    http_request: Request,
     request: EmailAnalysisRequest,
 ):
+
+    _enforce_rate_limit(http_request)
 
     if not any(
 
@@ -3680,11 +4127,13 @@ async def analyze_direct_email(
     "/api/v1/analyze/text"
 )
 async def analyze_text_email(
+    http_request: Request,
     request: EmailAnalysisRequest,
 ):
 
     return await analyze_direct_email(
-        request
+        http_request,
+        request,
     )
 
 
@@ -4099,7 +4548,11 @@ async def audit_chain_integrity():
 # ================================================================
 
 @app.post("/api/v2/emails/upload")
-async def upload_email_v2(file: UploadFile = File(...)):
+async def upload_email_v2(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    _enforce_rate_limit(request)
     filename = (file.filename or "").strip()
     if not filename.lower().endswith(".eml"):
         raise HTTPException(status_code=400, detail="Only .eml files are supported.")
@@ -4128,7 +4581,11 @@ async def upload_email_v2(file: UploadFile = File(...)):
 
 
 @app.post("/api/v2/emails/analyze")
-async def analyze_email_v2(request: V2TextAnalysisRequest):
+async def analyze_email_v2(
+    http_request: Request,
+    request: V2TextAnalysisRequest,
+):
+    _enforce_rate_limit(http_request)
     if not any((request.subject, request.sender, request.body, request.html)):
         raise HTTPException(status_code=400, detail="Email content is empty.")
     raw = _build_v2_message(request)
@@ -4319,11 +4776,13 @@ async def get_case_timeline_v2(case_id: str):
 
 @app.post("/api/v2/evidence/register")
 async def register_evidence_v2(
+    request: Request,
     file: UploadFile = File(...),
     evidence_type: str = Form("raw_eml"),
     case_id: str | None = Form(None),
     email_id: str | None = Form(None),
 ):
+    _enforce_rate_limit(request)
     raw = await file.read()
     if len(raw) > MAX_EVIDENCE_SIZE_BYTES:
         raise HTTPException(status_code=413, detail="Evidence exceeds the configured size limit.")
@@ -4364,7 +4823,13 @@ async def evidence_versions_v2(evidence_id: str):
 
 
 @app.post("/api/v2/evidence/{evidence_id}/versions")
-async def create_evidence_version_v2(evidence_id: str, file: UploadFile = File(...), reason: str = Form("replacement_preserved_as_new_version")):
+async def create_evidence_version_v2(
+    request: Request,
+    evidence_id: str,
+    file: UploadFile = File(...),
+    reason: str = Form("replacement_preserved_as_new_version"),
+):
+    _enforce_rate_limit(request)
     raw = await file.read()
     if len(raw) > MAX_EVIDENCE_SIZE_BYTES:
         raise HTTPException(status_code=413, detail="Evidence version exceeds the configured size limit.")
