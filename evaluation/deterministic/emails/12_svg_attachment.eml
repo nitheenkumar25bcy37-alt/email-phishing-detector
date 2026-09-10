@@ -1,0 +1,22 @@
+From: designs@example.com
+To: employee@example.com
+Subject: Company Logo
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============7898840846709366484=="
+
+--===============7898840846709366484==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please review the attached image.
+
+--===============7898840846709366484==
+Content-Type: image/svg+xml
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="logo.svg"
+MIME-Version: 1.0
+
+PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnPjxzY3JpcHQ+YWxlcnQoMSk8
+L3NjcmlwdD48L3N2Zz4=
+
+--===============7898840846709366484==--

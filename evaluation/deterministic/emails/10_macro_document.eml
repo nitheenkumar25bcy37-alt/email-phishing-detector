@@ -1,0 +1,21 @@
+From: documents@example.com
+To: employee@example.com
+Subject: Updated Payroll Document
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============2103275966924884574=="
+
+--===============2103275966924884574==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please review the attached payroll document.
+
+--===============2103275966924884574==
+Content-Type: application/vnd.ms-excel.sheet.macroEnabled.12
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="payroll.xlsm"
+MIME-Version: 1.0
+
+UEsDBEhhcm1sZXNzIE9PWE1MLWxpa2UgdGVzdCBkYXRhLg==
+
+--===============2103275966924884574==--

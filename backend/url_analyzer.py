@@ -455,6 +455,88 @@ class URLAnalyzer:
         )
 
     # ============================================================
+    # STATIC SSRF / INTERNAL DESTINATION CLASSIFICATION
+    # ============================================================
+
+    @staticmethod
+    def _classify_ip_address(hostname):
+        """Classify an IP without making any network connection."""
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            return {
+                "is_private_ip": False,
+                "is_loopback": False,
+                "is_link_local": False,
+                "is_reserved_ip": False,
+                "is_multicast": False,
+                "is_unspecified_ip": False,
+                "ssrf_risk": False,
+            }
+
+        is_private = ip.is_private
+        is_loopback = ip.is_loopback
+        is_link_local = ip.is_link_local
+        is_reserved = ip.is_reserved
+        is_multicast = ip.is_multicast
+        is_unspecified = ip.is_unspecified
+
+        # Treat non-public/special-use destinations as SSRF-sensitive.
+        ssrf_risk = (
+            is_private
+            or is_loopback
+            or is_link_local
+            or is_reserved
+            or is_multicast
+            or is_unspecified
+        )
+
+        return {
+            "is_private_ip": is_private,
+            "is_loopback": is_loopback,
+            "is_link_local": is_link_local,
+            "is_reserved_ip": is_reserved,
+            "is_multicast": is_multicast,
+            "is_unspecified_ip": is_unspecified,
+            "ssrf_risk": ssrf_risk,
+        }
+
+    @staticmethod
+    def _is_local_hostname(hostname):
+        """Detect obvious local/internal hostnames without DNS resolution."""
+        host = (hostname or "").lower().rstrip(".")
+
+        if not host:
+            return False
+
+        local_exact = {
+            "localhost",
+            "localhost.localdomain",
+            "ip6-localhost",
+            "ip6-loopback",
+            "broadcasthost",
+        }
+
+        if host in local_exact:
+            return True
+
+        # Internal single-label names and common local suffixes.
+        if "." not in host:
+            return True
+
+        internal_suffixes = (
+            ".localhost",
+            ".local",
+            ".localdomain",
+            ".internal",
+            ".intranet",
+            ".home",
+            ".lan",
+        )
+
+        return host.endswith(internal_suffixes)
+
+    # ============================================================
     # MAIN URL ANALYSIS
     # ============================================================
 
@@ -517,6 +599,24 @@ class URLAnalyzer:
             "userinfo_present": False,
 
             "port_present": False,
+
+            # Static SSRF / internal-destination indicators.
+            # No DNS lookup or remote network request is performed.
+            "is_private_ip": False,
+
+            "is_loopback": False,
+
+            "is_link_local": False,
+
+            "is_reserved_ip": False,
+
+            "is_multicast": False,
+
+            "is_unspecified_ip": False,
+
+            "is_local_hostname": False,
+
+            "ssrf_risk": False,
 
         }
 
@@ -660,16 +760,24 @@ class URLAnalyzer:
         )
 
         # --------------------------------------------------------
-        # IP address
+        # IP address / static SSRF classification
         # --------------------------------------------------------
 
-        try:
+        ip_classification = cls._classify_ip_address(hostname)
 
-            ipaddress.ip_address(
-                hostname
+        if any(
+            ip_classification.get(key)
+            for key in (
+                "is_private_ip",
+                "is_loopback",
+                "is_link_local",
+                "is_reserved_ip",
+                "is_multicast",
+                "is_unspecified_ip",
             )
-
+        ):
             result["is_ip_address"] = True
+            result.update(ip_classification)
 
             result["risk_score"] += 25
 
@@ -677,9 +785,33 @@ class URLAnalyzer:
                 "URL uses a raw IP address as the hostname"
             )
 
-        except ValueError:
+            result["risk_score"] += 25
+            result["risk_reasons"].append(
+                "IP address belongs to a private, loopback, link-local, reserved, multicast, or unspecified range"
+            )
 
-            pass
+        else:
+            try:
+                ipaddress.ip_address(hostname)
+                result["is_ip_address"] = True
+                result.update(ip_classification)
+
+                result["risk_score"] += 25
+
+                result["risk_reasons"].append(
+                    "URL uses a raw IP address as the hostname"
+                )
+
+            except ValueError:
+                # Hostname: classify obvious local/internal names only.
+                result["is_local_hostname"] = cls._is_local_hostname(hostname)
+
+                if result["is_local_hostname"]:
+                    result["ssrf_risk"] = True
+                    result["risk_score"] += 35
+                    result["risk_reasons"].append(
+                        "Hostname appears to reference a local or internal destination"
+                    )
 
         # --------------------------------------------------------
         # URL shortener
@@ -1586,10 +1718,12 @@ class URLAnalyzer:
                 rules.append(("idn_or_mixed_script", "high", 0.91, "Internationalized or mixed-script hostname detected", "The hostname uses IDN, punycode, or non-ASCII characters that can resemble another domain."))
             if result.get("is_ip_address"):
                 rules.append(("ip_based_url", "medium", 0.86, "URL uses an IP address", "The link uses a raw IP address instead of a registered domain."))
+            if result.get("ssrf_risk"):
+                rules.append(("ssrf_internal_destination", "high", 0.97, "Potential internal/SSRF destination", "The URL points to a local, private, link-local, reserved, multicast, unspecified, or obvious internal hostname. No network request was made."))
             if result.get("port_present") or parsed.port not in (None, 80, 443):
                 rules.append(("suspicious_port", "medium", 0.8, "URL uses a non-standard port", "The URL specifies a port outside the normal HTTP or HTTPS ports."))
             if result.get("risk_score", 0) >= 50:
                 rules.append(("suspicious_url_features", "high", 0.82, "Suspicious URL characteristics detected", "The URL contains multiple credential, brand, redirect, or infrastructure signals."))
             for rule, severity, confidence, title, description in rules:
-                findings.append({"finding_id": str(uuid4()), "category": "URL", "rule": rule, "severity": severity, "confidence": confidence, "title": title, "description": description, "evidence": {"url": href, "hostname": hostname, "registered_domain": result.get("registered_domain"), "risk_score": result.get("risk_score", 0), "risk_reasons": result.get("risk_reasons", [])[:10]}, "limitations": ["No remote URL was fetched; redirect chains and live reputation are not inferred."]})
+                findings.append({"finding_id": str(uuid4()), "category": "URL", "rule": rule, "severity": severity, "confidence": confidence, "title": title, "description": description, "evidence": {"url": href, "hostname": hostname, "registered_domain": result.get("registered_domain"), "risk_score": result.get("risk_score", 0), "risk_reasons": result.get("risk_reasons", [])[:10]}, "limitations": ["No DNS resolution or remote URL fetch was performed; redirect chains and live reputation are not inferred."]})
         return {"urls": results, "findings": findings, "highest_risk": max((item.get("risk_score", 0) for item in results), default=0), "redirect_chain": [], "network_fetch_performed": False}

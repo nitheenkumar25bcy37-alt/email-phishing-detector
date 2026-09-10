@@ -1,102 +1,252 @@
-"""Static, non-executing attachment analysis."""
+"""NETRA-Mail static attachment analyzer.
 
-from pathlib import PurePosixPath
+Never executes attachment content. Performs bounded metadata, filename,
+magic-byte, hashing, archive and embedded-URL inspection.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import math
+import os
+import re
+import zipfile
 from typing import Any, Dict, List
-from uuid import uuid4
 
 
 class AttachmentAnalyzer:
-    EXECUTABLE_EXTENSIONS = {".exe", ".scr", ".vbs", ".vbe", ".bat", ".cmd", ".com", ".pif", ".dll", ".sys", ".msi", ".ps1", ".psm1"}
-    SCRIPT_EXTENSIONS = {".js", ".jse", ".vbs", ".vbe", ".ps1", ".bat", ".cmd", ".hta", ".py", ".sh"}
-    ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2"}
-    MACRO_EXTENSIONS = {".docm", ".xlsm", ".pptm", ".dotm", ".xlam"}
-    HTML_EXTENSIONS = {".html", ".htm", ".shtml"}
-    SHORTCUT_EXTENSIONS = {".lnk", ".url", ".scf"}
-    DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf"}
-    EXECUTABLE_MIME_TYPES = {"application/x-msdownload", "application/x-dosexec", "application/x-executable", "application/vnd.microsoft.portable-executable"}
-    MIME_BY_EXTENSION = {".pdf": {"application/pdf"}, ".html": {"text/html"}, ".htm": {"text/html"}, ".jpg": {"image/jpeg"}, ".jpeg": {"image/jpeg"}, ".png": {"image/png"}, ".zip": {"application/zip"}, ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}, ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}}
+    CRITICAL_EXTENSIONS = {
+        ".exe", ".scr", ".pif", ".com", ".dll", ".sys", ".cpl",
+        ".msi", ".msp", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
+        ".bat", ".cmd", ".ps1", ".psm1", ".hta", ".lnk", ".jar", ".reg",
+    }
+    HIGH_EXTENSIONS = {".docm", ".xlsm", ".pptm", ".dotm", ".xltm", ".xlam", ".ppam", ".html", ".htm", ".svg"}
+    ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"}
+    SUSPICIOUS_NAME_TERMS = {
+        "invoice", "payment", "refund", "receipt", "salary", "payroll", "password",
+        "verify", "verification", "update", "security", "urgent", "document", "scan",
+    }
+    EXECUTABLE_MAGICS = (
+        (b"MZ", "PE executable"),
+        (b"\x7fELF", "ELF executable"),
+        (b"\xca\xfe\xba\xbe", "Mach-O executable"),
+        (b"\xcf\xfa\xed\xfe", "Mach-O executable"),
+        (b"\xfe\xed\xfa\xcf", "Mach-O executable"),
+    )
+
+    @staticmethod
+    def _ext(filename: str) -> str:
+        return os.path.splitext((filename or "").lower().strip())[1]
+
+    @staticmethod
+    def _double_extension(filename: str) -> bool:
+        base = os.path.basename(filename or "").lower()
+        parts = base.split(".")
+        if len(parts) < 3:
+            return False
+        return ("." + parts[-1]) in (AttachmentAnalyzer.CRITICAL_EXTENSIONS | AttachmentAnalyzer.HIGH_EXTENSIONS)
+
+    @staticmethod
+    def _entropy(data: bytes) -> float:
+        if not data:
+            return 0.0
+        counts = [0] * 256
+        for b in data:
+            counts[b] += 1
+        n = len(data)
+        return -sum((c / n) * math.log2(c / n) for c in counts if c)
 
     @classmethod
-    def _finding(cls, rule: str, severity: str, confidence: float, title: str, description: str, evidence: Dict[str, Any], limitations: List[str] | None = None) -> Dict[str, Any]:
-        return {"finding_id": str(uuid4()), "category": "Attachment", "rule": rule, "severity": severity, "confidence": confidence, "title": title, "description": description, "evidence": evidence, "limitations": limitations or []}
+    def _magic(cls, data: bytes) -> str | None:
+        for magic, label in cls.EXECUTABLE_MAGICS:
+            if data.startswith(magic):
+                return label
+        if data.startswith(b"PK\x03\x04"):
+            return "ZIP/OOXML archive"
+        if data.startswith(b"%PDF-"):
+            return "PDF document"
+        if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            return "OLE compound document"
+        if data.startswith((b"<!DOCTYPE html", b"<html", b"<HTML")):
+            return "HTML document"
+        return None
 
     @classmethod
-    def analyze(cls, attachments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        findings = []
-        legacy_items = []
-        risk_score = 0
-        for attachment in attachments or []:
-            filename = str(attachment.get("filename") or "unnamed").strip()
-            lower_name = filename.lower()
-            suffixes = [suffix.lower() for suffix in PurePosixPath(lower_name).suffixes]
-            extension = suffixes[-1] if suffixes else ""
-            content_type = str(attachment.get("content_type") or attachment.get("declared_mime_type") or "").lower()
-            reasons: List[str] = []
-            severity = "LOW"
-            evidence = {"filename": filename, "extension": extension, "content_type": content_type, "size_bytes": attachment.get("size_bytes", 0), "sha256": attachment.get("sha256", "")}
+    def _archive(cls, data: bytes, max_members: int = 500) -> tuple[List[Dict[str, Any]], List[str], bool, List[str]]:
+        members: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+        urls: List[str] = []
+        encrypted = False
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                infos = zf.infolist()
+                if len(infos) > max_members:
+                    reasons.append(f"Archive contains more than {max_members} members; nested inspection truncated.")
+                    infos = infos[:max_members]
+                for info in infos:
+                    name = info.filename[:1024]
+                    is_enc = bool(info.flag_bits & 0x1)
+                    encrypted = encrypted or is_enc
+                    ext = cls._ext(name)
+                    item = {"filename": name, "size_bytes": int(info.file_size), "is_directory": info.is_dir(), "encrypted": is_enc}
+                    if ext in cls.CRITICAL_EXTENSIONS:
+                        reasons.append(f"Archive contains executable/script member: {name}")
+                    elif ext in cls.HIGH_EXTENSIONS:
+                        reasons.append(f"Archive contains high-risk document/web member: {name}")
+                    members.append(item)
+                    if not info.is_dir() and info.file_size <= 512 * 1024:
+                        try:
+                            content = zf.read(info)
+                            urls.extend(re.findall(r"https?://[^\s<>\"']+", content.decode("utf-8", errors="ignore"))[:20])
+                        except Exception:
+                            pass
+                if encrypted:
+                    reasons.append("Password-protected/encrypted archive member detected; content cannot be fully inspected safely.")
+        except (zipfile.BadZipFile, OSError, ValueError):
+            pass
+        return members, sorted(set(urls))[:100], encrypted, reasons
 
-            if extension in cls.EXECUTABLE_EXTENSIONS or content_type in cls.EXECUTABLE_MIME_TYPES:
-                reasons.append("Executable attachment detected")
-                findings.append(cls._finding("executable_attachment", "high", 0.97, "Executable attachment detected", "The attachment uses an executable extension or executable MIME type.", evidence, ["Static inspection does not prove execution or malicious intent."]))
-                risk_score += 55
-                severity = "HIGH"
-            elif extension in cls.SCRIPT_EXTENSIONS:
-                reasons.append("Script attachment detected")
-                findings.append(cls._finding("script_attachment", "high", 0.94, "Script attachment detected", "The attachment can contain executable script content.", evidence))
-                risk_score += 42
-                severity = "HIGH"
-            elif extension in cls.MACRO_EXTENSIONS:
-                reasons.append("Macro-enabled Office document detected")
-                findings.append(cls._finding("macro_document", "medium", 0.93, "Macro-enabled document detected", "Macro-enabled Office files can contain active content and require static review.", evidence))
-                risk_score += 35
-                severity = "MEDIUM"
-            elif extension in cls.HTML_EXTENSIONS:
-                reasons.append("HTML attachment may contain active content")
-                findings.append(cls._finding("html_attachment", "medium", 0.88, "HTML attachment detected", "HTML attachments can contain credential forms or links and should not be rendered as trusted content.", evidence))
-                risk_score += 30
-                severity = "MEDIUM"
-            elif extension in cls.SHORTCUT_EXTENSIONS:
-                reasons.append("Shortcut attachment detected")
-                findings.append(cls._finding("shortcut_attachment", "high", 0.91, "Shortcut attachment detected", "Shortcut files can launch commands or redirect users.", evidence))
-                risk_score += 45
-                severity = "HIGH"
-            elif extension in cls.ARCHIVE_EXTENSIONS:
-                reasons.append("Archive attachment requires inspection")
-                findings.append(cls._finding("archive_attachment", "medium", 0.82, "Archive attachment detected", "Archives can conceal nested executable or script content.", {**evidence, "members": attachment.get("archive_members", [])}, ["Only archive metadata was inspected; members were not extracted or executed."]))
-                risk_score += 12
-                severity = "MEDIUM"
+    @classmethod
+    def _analyze_one(cls, item: Dict[str, Any]) -> Dict[str, Any]:
+        filename = str(item.get("filename") or item.get("name") or "inline-resource")
+        content_type = str(item.get("content_type") or item.get("mime_type") or "application/octet-stream").lower()
+        size = int(item.get("size_bytes") or item.get("size") or 0)
+        data = item.get("content") or item.get("payload") or b""
+        if isinstance(data, str):
+            data = data.encode("utf-8", errors="ignore")
+        if not isinstance(data, bytes):
+            data = b""
 
-            if len(suffixes) >= 2 and suffixes[-2] in cls.DOCUMENT_EXTENSIONS and extension in (cls.EXECUTABLE_EXTENSIONS | cls.SCRIPT_EXTENSIONS):
-                reasons.append("Filename uses a misleading double extension")
-                findings.append(cls._finding("double_extension", "high", 0.98, "Misleading double extension detected", "A document-looking filename ends in an executable or script extension.", evidence))
-                risk_score += 25
-                severity = "HIGH"
-            if filename.startswith(".") or "." not in filename.lstrip("."):
-                reasons.append("Filename has a hidden or missing extension")
-            expected_types = cls.MIME_BY_EXTENSION.get(extension, set())
-            if expected_types and content_type and content_type not in expected_types:
-                reasons.append("Declared MIME type does not match the filename extension")
-                findings.append(cls._finding("mime_mismatch", "medium", 0.86, "Attachment MIME type does not match its extension", "The declared media type differs from the expected type for the filename extension.", {**evidence, "expected_types": sorted(expected_types)}))
-                risk_score += 18
-                severity = "MEDIUM" if severity == "LOW" else severity
+        ext = cls._ext(filename)
+        reasons: List[str] = []
+        severity = "LOW"
+        score = 0
+        magic = cls._magic(data) or str(item.get("magic_signature") or "") or None
+        double_ext = cls._double_extension(filename)
+        hidden_ext = filename.startswith(".") and "." in filename[1:]
 
-            members = attachment.get("archive_members", []) or []
-            nested_suspicious = [member for member in members if PurePosixPath(str(member.get("filename", "")).lower()).suffix in (cls.EXECUTABLE_EXTENSIONS | cls.SCRIPT_EXTENSIONS)]
-            if nested_suspicious:
-                reasons.append("Archive contains executable or script-looking members")
-                findings.append(cls._finding("nested_executable", "high", 0.95, "Archive contains executable-looking content", "Archive member names indicate executable or script content without extracting it.", {**evidence, "suspicious_members": nested_suspicious}, ["Member names are evidence only; content was not executed."]))
-                risk_score += 35
-                severity = "HIGH"
-            if any(member.get("encrypted") for member in members):
-                findings.append(cls._finding("password_protected_archive", "medium", 0.8, "Password-protected archive detected", "Encrypted archive members cannot be fully inspected by this static pass.", evidence))
-                reasons.append("Password-protected archive")
-                risk_score += 10
-            if attachment.get("embedded_urls"):
-                findings.append(cls._finding("embedded_url", "medium", 0.78, "Attachment contains embedded URL references", "Static content extraction found URL references inside the attachment payload.", {**evidence, "urls": attachment["embedded_urls"][:20]}))
-                reasons.append("Embedded URLs detected")
-                risk_score += 15
-            if reasons:
-                legacy_items.append({**evidence, "severity": severity, "reasons": reasons})
+        if ext in cls.CRITICAL_EXTENSIONS:
+            score += 80; severity = "CRITICAL"
+            reasons.append(f"Dangerous executable/script attachment extension: {ext}")
+        elif ext in cls.HIGH_EXTENSIONS:
+            score += 55; severity = "HIGH"
+            if ext in {".docm", ".xlsm", ".pptm", ".dotm", ".xltm", ".xlam", ".ppam"}:
+                reasons.append("Macro-enabled Office document detected; macros can execute code when enabled.")
+            else:
+                reasons.append(f"High-risk attachment type: {ext}")
+        elif ext in cls.ARCHIVE_EXTENSIONS:
+            score += 25; severity = "MEDIUM"
+            reasons.append(f"Archive attachment detected: {ext}")
 
-        risk_score = min(100, risk_score)
-        return {"attachments": legacy_items, "findings": findings, "attachment_count": len(attachments or []), "suspicious_attachment_count": len(legacy_items), "score": risk_score, "risk_level": "HIGH" if risk_score >= 50 else "MEDIUM" if risk_score else "LOW"}
+        if double_ext:
+            score += 25
+            severity = "CRITICAL" if severity in {"LOW", "MEDIUM", "HIGH"} else severity
+            reasons.append("Double-extension filename may disguise a dangerous file type.")
+        if hidden_ext:
+            score += 10
+            reasons.append("Hidden/dot-prefixed attachment filename detected.")
+
+        name_lower = filename.lower()
+        matched_terms = [t for t in cls.SUSPICIOUS_NAME_TERMS if t in name_lower]
+        if matched_terms and ext in cls.CRITICAL_EXTENSIONS | cls.HIGH_EXTENSIONS:
+            score += 10
+            reasons.append("Filename contains contextually suspicious delivery terms: " + ", ".join(sorted(matched_terms)))
+
+        if magic:
+            if "executable" in magic:
+                score = max(score, 90); severity = "CRITICAL"
+                reasons.append(f"File signature indicates {magic}.")
+            elif magic == "OLE compound document" and ext in {".doc", ".xls", ".ppt"}:
+                score += 10
+                reasons.append("Legacy Office OLE document detected; embedded active content is possible.")
+
+        declared_vs_magic = False
+        if magic == "PE executable" and ext not in {".exe", ".scr", ".dll", ".sys", ".cpl", ".ocx"}:
+            declared_vs_magic = True; score = max(score, 90); severity = "CRITICAL"
+            reasons.append("MIME/filename does not match executable file signature.")
+        elif magic == "PDF document" and ext not in {".pdf"}:
+            declared_vs_magic = True; score = max(score, 70); severity = "HIGH"
+            reasons.append("Filename extension does not match PDF file signature.")
+        elif magic == "PE executable" and ext == ".pdf":
+            declared_vs_magic = True; score = max(score, 90); severity = "CRITICAL"
+            reasons.append("Attachment is declared as PDF but its file signature is a Windows executable.")
+        elif magic == "HTML document" and ext not in {".html", ".htm", ".svg"}:
+            declared_vs_magic = True; score = max(score, 60); severity = "HIGH"
+            reasons.append("Filename extension does not match HTML content signature.")
+
+        archive_members: List[Dict[str, Any]] = []
+        embedded_urls: List[str] = []
+        encrypted = False
+        if ext in cls.ARCHIVE_EXTENSIONS or content_type in {"application/zip", "application/x-7z-compressed", "application/x-rar-compressed"} or data.startswith(b"PK\x03\x04") or magic == "ZIP/OOXML archive":
+            archive_members, embedded_urls, encrypted, archive_reasons = cls._archive(data)
+            reasons.extend(archive_reasons)
+            if any(cls._ext(x.get("filename", "")) in cls.CRITICAL_EXTENSIONS for x in archive_members):
+                score = max(score, 90); severity = "CRITICAL"
+            elif archive_members:
+                score = max(score, 40); severity = "MEDIUM" if score < 50 else severity
+            elif magic == "ZIP/OOXML archive" or ext in cls.ARCHIVE_EXTENSIONS:
+                score = max(score, 40); severity = "MEDIUM" if score < 50 else severity
+                reasons.append("Archive container detected; static member inspection was unavailable or the archive structure could not be parsed.")
+
+        if not data and item.get("analysis_skipped"):
+            reasons.append(str(item.get("skip_reason") or "Attachment content was not available for static inspection."))
+
+        sha256 = item.get("sha256") or (hashlib.sha256(data).hexdigest() if data else None)
+        entropy = cls._entropy(data[:2 * 1024 * 1024]) if data else 0.0
+        if entropy >= 7.5 and size >= 4096 and ext in cls.CRITICAL_EXTENSIONS:
+            reasons.append("High-entropy executable/script content detected.")
+            score = max(score, 90); severity = "CRITICAL"
+
+        if encrypted and severity == "LOW":
+            severity = "MEDIUM"
+
+        return {
+            "filename": filename,
+            "extension": ext,
+            "content_type": content_type,
+            "declared_mime_type": str(item.get("declared_mime_type") or content_type),
+            "size_bytes": size,
+            "sha256": sha256,
+            "magic_signature": magic,
+            "mime_mismatch": declared_vs_magic,
+            "double_extension": double_ext,
+            "hidden_extension": hidden_ext,
+            "entropy": round(entropy, 4),
+            "archive": bool(archive_members or ext in cls.ARCHIVE_EXTENSIONS),
+            "encrypted_archive": encrypted,
+            "archive_members": archive_members,
+            "embedded_urls": embedded_urls,
+            "reasons": list(dict.fromkeys(reasons)),
+            "score": min(100, score),
+            "risk_level": severity,
+            "suspicious": score >= 35,
+            "analysis_skipped": bool(item.get("analysis_skipped", False)),
+        }
+
+    @classmethod
+    def analyze(cls, attachments: List[Dict[str, Any]] | None) -> Dict[str, Any]:
+        attachments = attachments or []
+        findings = [cls._analyze_one(x if isinstance(x, dict) else {}) for x in attachments]
+        highest = max((x["score"] for x in findings), default=0)
+        suspicious = sum(1 for x in findings if x["suspicious"])
+        reasons = []
+        for x in findings:
+            reasons.extend(x["reasons"])
+        if highest >= 75:
+            risk = "CRITICAL"
+        elif highest >= 50:
+            risk = "HIGH"
+        elif highest >= 25:
+            risk = "MEDIUM"
+        else:
+            risk = "LOW"
+        return {
+            "attachments": findings,
+            "attachment_count": len(findings),
+            "suspicious_attachment_count": suspicious,
+            "score": highest,
+            "risk_level": risk,
+            "findings": list(dict.fromkeys(reasons)),
+            "static_only": True,
+            "execution_performed": False,
+        }

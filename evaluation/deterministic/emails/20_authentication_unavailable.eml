@@ -1,0 +1,9 @@
+From: service@example.com
+To: user@example.com
+Subject: Routine Notification
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+This is a routine notification used to verify behavior when SPF, DKIM and DMA=
+RC results are unavailable.

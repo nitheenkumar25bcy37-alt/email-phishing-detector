@@ -1,17 +1,6 @@
 // ============================================================
 // NETRA-MAIL SHIELD
-// Gmail Real-Time Protection + SOC Dashboard
-// ============================================================
-
-const API_BASE_URL =
-    "http://127.0.0.1:8000";
-
-const SOC_DASHBOARD_URL =
-    "http://localhost:8501";
-
-
-// ============================================================
-// STATE
+// Gmail Real-Time Protection
 // ============================================================
 
 let protectionEnabled = false;
@@ -21,8 +10,6 @@ let lastEmailKey = "";
 let scanning = false;
 
 let scanTimer = null;
-
-let progressTimer = null;
 
 
 // ============================================================
@@ -38,33 +25,25 @@ function loadProtectionState() {
             protectionEnabled =
                 result.netraProtectionEnabled === true;
 
+
             if (!protectionEnabled) {
 
-                removeNetraUI();
+                removeNetraBadge();
 
                 lastEmailKey = "";
 
                 return;
             }
+
+
+            scheduleScan();
         }
     );
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== "NETRA_ANALYZE_CURRENT_EMAIL") {
-        return;
-    }
-    if (!protectionEnabled) {
-        sendResponse({ok: false, error: "Enable Email Protection first."});
-        return;
-    }
-    scanCurrentEmail(true).then((result) => sendResponse({ok: Boolean(result), result: result || null, error: result ? null : "Open a Gmail message before analyzing."}));
-    return true;
-});
-
 
 // ============================================================
-// PROTECTION STATE CHANGE
+// STORAGE CHANGE LISTENER
 // ============================================================
 
 chrome.storage.onChanged.addListener(
@@ -77,19 +56,24 @@ chrome.storage.onChanged.addListener(
             return;
         }
 
+
         protectionEnabled =
             changes.netraProtectionEnabled.newValue === true;
 
-        lastEmailKey = "";
 
         if (!protectionEnabled) {
 
-            removeNetraUI();
+            removeNetraBadge();
+
+            lastEmailKey = "";
 
             return;
         }
 
-            removeNetraUI();
+
+        lastEmailKey = "";
+
+        scheduleScan();
     }
 );
 
@@ -102,11 +86,17 @@ loadProtectionState();
 
 
 // ============================================================
-// OBSERVER
+// MUTATION OBSERVER
 // ============================================================
 
 const observer =
     new MutationObserver(() => {
+
+        if (!protectionEnabled) {
+            return;
+        }
+
+        scheduleScan();
     });
 
 
@@ -122,6 +112,7 @@ function startObserver() {
         return;
     }
 
+
     observer.observe(
         document.body,
         {
@@ -130,6 +121,7 @@ function startObserver() {
         }
     );
 }
+
 
 startObserver();
 
@@ -140,23 +132,21 @@ startObserver();
 
 function scheduleScan() {
 
-    clearTimeout(
-        scanTimer
-    );
+    clearTimeout(scanTimer);
 
-    scanTimer = setTimeout(
-        () => {
 
-            scanCurrentEmail();
-
-        },
-        700
-    );
+    scanTimer =
+        setTimeout(
+            () => {
+                scanCurrentEmail();
+            },
+            700
+        );
 }
 
 
 // ============================================================
-// FIND SUBJECT
+// SUBJECT
 // ============================================================
 
 function findSubjectElement() {
@@ -167,31 +157,32 @@ function findSubjectElement() {
         "div.hP"
     ];
 
-    for (
-        const selector of selectors
-    ) {
+
+    for (const selector of selectors) {
 
         const element =
-            document.querySelector(
-                selector
-            );
+            document.querySelector(selector);
+
 
         if (
             element &&
-            element.innerText &&
-            element.innerText.trim()
+            (
+                element.innerText ||
+                element.textContent
+            )
         ) {
 
             return element;
         }
     }
 
+
     return null;
 }
 
 
 // ============================================================
-// FIND SENDER
+// SENDER
 // ============================================================
 
 function findSenderElement() {
@@ -202,23 +193,18 @@ function findSenderElement() {
         ".gD"
     ];
 
-    for (
-        const selector of selectors
-    ) {
+
+    for (const selector of selectors) {
 
         const elements =
-            document.querySelectorAll(
-                selector
-            );
+            document.querySelectorAll(selector);
 
-        for (
-            const element of elements
-        ) {
+
+        for (const element of elements) {
 
             const email =
-                element.getAttribute(
-                    "email"
-                );
+                element.getAttribute("email");
+
 
             if (
                 email &&
@@ -230,12 +216,13 @@ function findSenderElement() {
         }
     }
 
+
     return null;
 }
 
 
 // ============================================================
-// FIND BODY
+// BODY
 // ============================================================
 
 function findBodyElement() {
@@ -245,9 +232,11 @@ function findBodyElement() {
             "div.a3s"
         );
 
+
     if (!bodies.length) {
         return null;
     }
+
 
     for (
         let i = bodies.length - 1;
@@ -258,18 +247,46 @@ function findBodyElement() {
         const body =
             bodies[i];
 
+
+        const text =
+            body.innerText ||
+            body.textContent ||
+            "";
+
+
         if (
-            body.innerText &&
-            body.innerText.trim()
+            text.trim().length > 10 &&
+            isVisible(body)
         ) {
 
             return body;
         }
     }
 
-    return bodies[
-        bodies.length - 1
-    ];
+
+    return null;
+}
+
+
+// ============================================================
+// VISIBILITY
+// ============================================================
+
+function isVisible(element) {
+
+    if (!element) {
+        return false;
+    }
+
+
+    const rect =
+        element.getBoundingClientRect();
+
+
+    return (
+        rect.width > 0 &&
+        rect.height > 0
+    );
 }
 
 
@@ -277,7 +294,7 @@ function findBodyElement() {
 // EMAIL EXTRACTION
 // ============================================================
 
-function getCurrentEmail() {
+function extractCurrentEmail() {
 
     const subjectEl =
         findSubjectElement();
@@ -288,318 +305,140 @@ function getCurrentEmail() {
     const bodyEl =
         findBodyElement();
 
-    if (!subjectEl || !bodyEl) {
 
+    if (
+        !subjectEl ||
+        !senderEl ||
+        !bodyEl
+    ) {
         return null;
     }
+
 
     const subject =
-        subjectEl.innerText.trim();
+        (
+            subjectEl.innerText ||
+            subjectEl.textContent ||
+            ""
+        ).trim();
 
-    const sender =
-        senderEl
-            ? (
-                senderEl.getAttribute(
-                    "email"
-                ) ||
+
+    let sender =
+        senderEl.getAttribute(
+            "email"
+        );
+
+
+    if (!sender) {
+
+        sender =
+            (
                 senderEl.innerText ||
                 ""
-            ).trim()
-            : "";
+            ).trim();
+    }
+
 
     const body =
-        bodyEl.innerText.trim();
+        (
+            bodyEl.innerText ||
+            bodyEl.textContent ||
+            ""
+        ).trim();
+
 
     if (
-        !subject &&
+        !subject ||
+        !sender ||
         !body
     ) {
-
         return null;
     }
+
+
+    // --------------------------------------------------------
+    // Gmail recipient
+    // --------------------------------------------------------
+
+    let recipient = "";
+
+    const recipientSelectors = [
+        "[email][data-hovercard-id]",
+        "span[email]"
+    ];
+
+
+    for (
+        const selector
+        of recipientSelectors
+    ) {
+
+        const elements =
+            document.querySelectorAll(
+                selector
+            );
+
+
+        for (
+            const element
+            of elements
+        ) {
+
+            const email =
+                element.getAttribute(
+                    "email"
+                );
+
+
+            if (
+                email &&
+                email.includes("@") &&
+                email !== sender
+            ) {
+
+                recipient = email;
+
+                break;
+            }
+        }
+
+
+        if (recipient) {
+            break;
+        }
+    }
+
+
+    // --------------------------------------------------------
+    // HTML
+    // --------------------------------------------------------
+
+    let html = "";
+
+    if (bodyEl) {
+
+        html =
+            bodyEl.innerHTML ||
+            "";
+    }
+
+
+    // Limit payload size before sending
+    html =
+        html.slice(
+            0,
+            500000
+        );
+
 
     return {
-        subjectEl,
-        senderEl,
-        bodyEl,
         subject,
         sender,
-        body
+        recipient,
+        reply_to: "",
+        body: body.slice(0, 500000),
+        html
     };
-}
-
-
-// ============================================================
-// SCAN
-// ============================================================
-
-async function scanCurrentEmail(force = false) {
-
-    if (
-        !protectionEnabled ||
-        scanning
-    ) {
-        return;
-    }
-
-    const email =
-        getCurrentEmail();
-
-    if (!email) {
-        return;
-    }
-
-    const emailKey =
-        createEmailKey(
-            email.subject,
-            email.sender,
-            email.body
-        );
-
-    if (!force && lastEmailKey === emailKey) {
-        return;
-    }
-
-    lastEmailKey =
-        emailKey;
-
-    scanning = true;
-
-    showScanningBar(
-        email.subjectEl
-    );
-
-    try {
-
-        updateScanningStage(
-            "EXTRACTING EMAIL",
-            20,
-            "Reading sender, subject and message body..."
-        );
-
-        await sleep(120);
-
-
-        updateScanningStage(
-            "ANALYZING CONTENT",
-            40,
-            "Checking phishing language and indicators..."
-        );
-
-        await sleep(120);
-
-
-        updateScanningStage(
-            "THREAT INTELLIGENCE",
-            60,
-            "Checking domains, URLs and threat signals..."
-        );
-
-
-        const response =
-            await fetch(
-                `${API_BASE_URL}/api/v2/emails/analyze`,
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        subject:
-                            email.subject,
-
-                        sender:
-                            email.sender,
-
-                        body:
-                            email.body
-                    })
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                `Backend returned HTTP ${response.status}`
-            );
-        }
-
-
-        updateScanningStage(
-            "CALIBRATING RESULT",
-            80,
-            "Combining independent threat signals..."
-        );
-
-
-        const data =
-            await response.json();
-
-
-        await sleep(150);
-
-
-            const result =
-            normalizeResult(
-                data
-            );
-
-
-        if (!result) {
-
-            throw new Error(
-                "Invalid NETRA response"
-            );
-        }
-
-
-        updateScanningStage(
-            "ASSESSMENT COMPLETE",
-            100,
-            "Threat assessment generated."
-        );
-
-
-        await sleep(200);
-
-
-        renderThreatBar(
-            email.subjectEl,
-            result
-        );
-
-            return result;
-
-
-    } catch (error) {
-
-        console.error(
-            "[NETRA] Scan failed:",
-            error
-        );
-
-        renderErrorBar(
-            email.subjectEl
-        );
-
-    } finally {
-
-        scanning = false;
-
-        stopProgressAnimation();
-    }
-}
-
-
-// ============================================================
-// NORMALIZE RESULT
-// ============================================================
-
-function normalizeResult(
-    data
-) {
-
-    if (!data) {
-        return null;
-    }
-
-    if (data.risk_score !== undefined || data.classification) {
-        return {
-            score: Number(data.risk_score || 0),
-            risk: String(data.classification || "UNKNOWN").toUpperCase(),
-            action: Number(data.risk_score || 0) >= 75 ? "BLOCK" : Number(data.risk_score || 0) >= 50 ? "QUARANTINE" : "REVIEW",
-            confidence: Number(data.confidence || 0) * 100,
-            caseId: data.email_id || "",
-            findingCount: Array.isArray(data.findings) ? data.findings.length : 0
-        };
-    }
-
-
-    if (
-        data.decision
-    ) {
-
-        const decision =
-            data.decision;
-
-        return {
-
-            score:
-                Number(
-                    decision.score ||
-                    data.threat_score?.threat_score ||
-                    0
-                ),
-
-            risk:
-                String(
-                    decision.risk ||
-                    "UNKNOWN"
-                ).toUpperCase(),
-
-            action:
-                String(
-                    decision.action ||
-                    "REVIEW"
-                ).toUpperCase(),
-
-            confidence:
-                Number(
-                    decision.confidence ||
-                    data.threat_score?.confidence ||
-                    0
-                ),
-
-            caseId:
-                data.case_id || ""
-        };
-    }
-
-
-    if (
-        data.netra_result
-    ) {
-
-        return {
-
-            score:
-                Number(
-                    data.netra_result.score ||
-                    0
-                ),
-
-            risk:
-                String(
-                    data.netra_result.risk ||
-                    "UNKNOWN"
-                ).toUpperCase(),
-
-            action:
-                String(
-                    data.netra_result.action ||
-                    "REVIEW"
-                ).toUpperCase(),
-
-            confidence:
-                Number(
-                    data.netra_result.confidence ||
-                    0
-                ),
-
-            caseId:
-                data.netra_result.case_id ||
-                data.case_id ||
-                ""
-        };
-    }
-
-
-    return null;
 }
 
 
@@ -613,722 +452,521 @@ function createEmailKey(
     body
 ) {
 
-    return [
-        subject,
-        sender,
-        body.substring(
-            0,
-            700
-        )
-    ].join("|");
+    const raw =
+        `${subject}|${sender}|${body.slice(0, 500)}`;
+
+    let hash = 0;
+
+
+    for (
+        let i = 0;
+        i < raw.length;
+        i++
+    ) {
+
+        hash =
+            (
+                (
+                    hash << 5
+                ) -
+                hash
+            ) +
+            raw.charCodeAt(i);
+
+
+        hash |= 0;
+    }
+
+
+    return String(hash);
 }
 
 
 // ============================================================
-// REMOVE UI
+// MAIN SCAN
 // ============================================================
 
-function removeNetraUI() {
+async function scanCurrentEmail() {
 
-    const ids = [
-        "netra-threat-bar",
-        "netra-scanning-bar"
-    ];
-
-    ids.forEach(
-        id => {
-
-            const element =
-                document.getElementById(
-                    id
-                );
-
-            if (element) {
-                element.remove();
-            }
-        }
-    );
-
-    stopProgressAnimation();
-}
+    if (!protectionEnabled) {
+        return;
+    }
 
 
-// ============================================================
-// STOP PROGRESS
-// ============================================================
+    if (scanning) {
+        return;
+    }
 
-function stopProgressAnimation() {
 
-    if (progressTimer) {
+    const email =
+        extractCurrentEmail();
 
-        clearInterval(
-            progressTimer
+
+    if (!email) {
+        return;
+    }
+
+
+    const emailKey =
+        createEmailKey(
+            email.subject,
+            email.sender,
+            email.body
         );
 
-        progressTimer =
-            null;
+
+    if (
+        lastEmailKey === emailKey
+    ) {
+
+        return;
+    }
+
+
+    lastEmailKey =
+        emailKey;
+
+
+    showScanningBadge(
+        email.subjectEl
+    );
+
+
+    scanning = true;
+
+
+    try {
+
+        const result =
+            await analyzeThroughBackground(
+                email
+            );
+
+
+        const normalized =
+            normalizeResult(
+                result
+            );
+
+
+        if (!normalized) {
+
+            throw new Error(
+                "Invalid NETRA response."
+            );
+        }
+
+
+        renderThreatBadge(
+            findSubjectElement(),
+            normalized
+        );
+
+    }
+    catch (error) {
+
+        console.error(
+            "[NETRA] Scan failed:",
+            error
+        );
+
+
+        renderErrorBadge(
+            findSubjectElement(),
+            error.message
+        );
+
+    }
+    finally {
+
+        scanning = false;
     }
 }
 
 
 // ============================================================
-// SUBJECT CONTAINER
+// BACKGROUND API BRIDGE
 // ============================================================
 
-function getSubjectContainer(
+function analyzeThroughBackground(
+    email
+) {
+
+    return new Promise(
+        (
+            resolve,
+            reject
+        ) => {
+
+            chrome.runtime.sendMessage(
+                {
+                    type:
+                        "NETRA_ANALYZE_EMAIL",
+
+                    email
+                },
+
+                (response) => {
+
+                    if (
+                        chrome.runtime.lastError
+                    ) {
+
+                        reject(
+                            new Error(
+                                chrome.runtime.lastError.message
+                            )
+                        );
+
+                        return;
+                    }
+
+
+                    if (
+                        !response
+                    ) {
+
+                        reject(
+                            new Error(
+                                "No response from NETRA background service."
+                            )
+                        );
+
+                        return;
+                    }
+
+
+                    if (
+                        !response.success
+                    ) {
+
+                        reject(
+                            new Error(
+                                response.error ||
+                                "NETRA backend request failed."
+                            )
+                        );
+
+                        return;
+                    }
+
+
+                    resolve(
+                        response.data
+                    );
+                }
+            );
+        }
+    );
+}
+
+
+// ============================================================
+// RESULT NORMALIZATION
+// ============================================================
+
+function normalizeResult(data) {
+
+    if (!data) {
+        return null;
+    }
+
+
+    const decision =
+        data.decision ||
+        {};
+
+
+    const score =
+        Number(
+            decision.score ??
+            data.risk_score ??
+            data.score ??
+            0
+        );
+
+
+    const riskLevel =
+        String(
+            decision.risk_level ??
+            decision.risk ??
+            data.classification ??
+            "UNKNOWN"
+        ).toUpperCase();
+
+
+    const action =
+        String(
+            decision.action ??
+            "REVIEW"
+        ).toUpperCase();
+
+
+    const confidence =
+        Number(
+            decision.confidence ??
+            data.confidence ??
+            0
+        );
+
+
+    const classification =
+        String(
+            decision.attack_classification ??
+            decision.classification ??
+            data.classification ??
+            "Unknown"
+        );
+
+
+    return {
+        score,
+        riskLevel,
+        action,
+        confidence,
+        classification,
+        raw: data
+    };
+}
+
+
+// ============================================================
+// SCANNING BADGE
+// ============================================================
+
+function showScanningBadge(
     subjectEl
 ) {
 
     if (!subjectEl) {
-        return null;
-    }
-
-    return (
-        subjectEl.closest(
-            "div.ha"
-        ) ||
-        subjectEl.parentElement ||
-        subjectEl
-    );
-}
-
-
-// ============================================================
-// INSERT
-// ============================================================
-
-function insertBar(
-    subjectEl,
-    bar
-) {
-
-    const container =
-        getSubjectContainer(
-            subjectEl
-        );
-
-    if (!container) {
         return;
     }
 
-    container
-        .parentElement
-        ?.insertBefore(
-            bar,
-            container
-        );
-}
 
-
-// ============================================================
-// SCANNING BAR
-// ============================================================
-
-function showScanningBar(
-    subjectEl
-) {
-
-    const old =
+    let badge =
         document.getElementById(
-            "netra-scanning-bar"
+            "netra-mail-badge"
         );
 
-    if (old) {
-        old.remove();
-    }
+
+    if (!badge) {
+
+        badge =
+            document.createElement(
+                "span"
+            );
+
+        badge.id =
+            "netra-mail-badge";
 
 
-    const bar =
-        document.createElement(
-            "div"
-        );
-
-    bar.id =
-        "netra-scanning-bar";
-
-
-    Object.assign(
-        bar.style,
-        {
-
-            width: "100%",
-
-            minHeight: "48px",
-
-            boxSizing: "border-box",
-
-            margin: "0 0 10px 0",
-
-            padding: "8px 14px",
-
-            borderRadius: "8px",
-
-            background:
-                "#0f172a",
-
-            border:
-                "1px solid #1e40af",
-
-            color:
-                "#e2e8f0",
-
-            fontFamily:
-                "Arial, sans-serif",
-
-            fontSize:
-                "12px",
-
-            position:
-                "relative",
-
-            overflow:
-                "hidden",
-
-            zIndex:
-                "999999"
-        }
-    );
-
-
-    bar.innerHTML = `
-
-        <div style="
-            display:flex;
-            justify-content:space-between;
+        badge.style.cssText = `
+            display:inline-flex;
             align-items:center;
-        ">
-
-            <div>
-
-                <div
-                    id="netra-stage-title"
-                    style="
-                        font-weight:700;
-                        font-size:12px;
-                    "
-                >
-                    NETRA • SCANNING
-                </div>
-
-                <div
-                    id="netra-stage-message"
-                    style="
-                        color:#94a3b8;
-                        font-size:10px;
-                        margin-top:2px;
-                    "
-                >
-                    Initializing threat analysis...
-                </div>
-
-            </div>
-
-            <div
-                id="netra-stage-percent"
-                style="
-                    font-weight:700;
-                    font-size:11px;
-                "
-            >
-                0%
-            </div>
-
-        </div>
-
-        <div style="
-            margin-top:7px;
-            width:100%;
-            height:3px;
+            margin-left:12px;
+            padding:5px 10px;
+            border-radius:999px;
             background:#1e293b;
-            border-radius:10px;
-        ">
-
-            <div
-                id="netra-progress"
-                style="
-                    height:3px;
-                    width:0%;
-                    background:#38bdf8;
-                    border-radius:10px;
-                    transition:width .25s ease;
-                "
-            ></div>
-
-        </div>
-    `;
+            color:#7dd3fc;
+            font-family:Arial,sans-serif;
+            font-size:12px;
+            font-weight:700;
+            z-index:999999;
+        `;
 
 
-    insertBar(
-        subjectEl,
-        bar
-    );
+        subjectEl.appendChild(
+            badge
+        );
+    }
+
+
+    badge.textContent =
+        "🛡️ NETRA SCANNING...";
 }
 
 
 // ============================================================
-// UPDATE STAGE
+// THREAT BADGE
 // ============================================================
 
-function updateScanningStage(
-    title,
-    percent,
-    message
-) {
-
-    const titleEl =
-        document.getElementById(
-            "netra-stage-title"
-        );
-
-    const messageEl =
-        document.getElementById(
-            "netra-stage-message"
-        );
-
-    const percentEl =
-        document.getElementById(
-            "netra-stage-percent"
-        );
-
-    const progress =
-        document.getElementById(
-            "netra-progress"
-        );
-
-
-    if (titleEl) {
-        titleEl.textContent =
-            `NETRA • ${title}`;
-    }
-
-    if (messageEl) {
-        messageEl.textContent =
-            message;
-    }
-
-    if (percentEl) {
-        percentEl.textContent =
-            `${percent}%`;
-    }
-
-    if (progress) {
-        progress.style.width =
-            `${percent}%`;
-    }
-}
-
-
-// ============================================================
-// THREAT BAR
-// ============================================================
-
-function renderThreatBar(
+function renderThreatBadge(
     subjectEl,
     result
 ) {
 
-    removeNetraUI();
+    if (!subjectEl) {
+        return;
+    }
 
 
-    const score =
-        Math.max(
-            0,
-            Math.min(
-                100,
-                Math.round(
-                    Number(
-                        result.score
-                    ) || 0
-                )
-            )
+    let badge =
+        document.getElementById(
+            "netra-mail-badge"
         );
 
 
-    const risk =
-        normalizeRisk(
-            result.risk,
-            score
+    if (!badge) {
+
+        badge =
+            document.createElement(
+                "span"
+            );
+
+        badge.id =
+            "netra-mail-badge";
+
+
+        subjectEl.appendChild(
+            badge
         );
+    }
 
 
-    const action =
-        result.action ||
-        "REVIEW";
+    let background =
+        "#166534";
 
-
-    const bar =
-        document.createElement(
-            "div"
-        );
-
-    bar.id =
-        "netra-threat-bar";
-
-
-    Object.assign(
-        bar.style,
-        {
-
-            width: "100%",
-
-            minHeight: "48px",
-
-            boxSizing: "border-box",
-
-            margin: "0 0 10px 0",
-
-            padding: "9px 14px",
-
-            borderRadius: "8px",
-
-            fontFamily:
-                "Arial, sans-serif",
-
-            fontSize: "12px",
-
-            position:
-                "relative",
-
-            zIndex:
-                "999999",
-
-            background:
-                getRiskBackground(
-                    risk
-                ),
-
-            border:
-                `1px solid ${getRiskBorder(risk)}`,
-
-            color:
-                "#ffffff"
-        }
-    );
-
-
-    const caseLink =
-        result.caseId
-            ? `${SOC_DASHBOARD_URL}?case_id=${encodeURIComponent(result.caseId)}`
-            : SOC_DASHBOARD_URL;
-
-
-    bar.innerHTML = `
-
-        <div style="
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:15px;
-            flex-wrap:wrap;
-        ">
-
-            <div style="
-                display:flex;
-                align-items:center;
-                gap:8px;
-            ">
-
-                <span style="
-                    font-size:16px;
-                ">
-                    ${getRiskIcon(risk)}
-                </span>
-
-                <strong>
-                    NETRA • ${getRiskLabel(risk)}
-                </strong>
-
-                <span style="
-                    opacity:.9;
-                    font-weight:700;
-                ">
-                    ${score}%
-                </span>
-
-                <span style="
-                    opacity:.75;
-                ">
-                    ${action}
-                </span>
-
-            </div>
-
-            <a
-                href="${caseLink}"
-                target="_blank"
-                rel="noopener noreferrer"
-                style="
-                    color:#ffffff;
-                    text-decoration:none;
-                    font-weight:700;
-                    border:1px solid rgba(255,255,255,.45);
-                    padding:5px 9px;
-                    border-radius:6px;
-                    background:rgba(255,255,255,.10);
-                "
-            >
-                View Full SOC Investigation →
-            </a>
-
-        </div>
-    `;
-
-
-    insertBar(
-        subjectEl,
-        bar
-    );
-}
-
-
-// ============================================================
-// ERROR
-// ============================================================
-
-function renderErrorBar(
-    subjectEl
-) {
-
-    removeNetraUI();
-
-
-    const bar =
-        document.createElement(
-            "div"
-        );
-
-    bar.id =
-        "netra-threat-bar";
-
-
-    Object.assign(
-        bar.style,
-        {
-
-            width: "100%",
-
-            minHeight: "42px",
-
-            margin: "0 0 10px 0",
-
-            padding: "10px 14px",
-
-            boxSizing: "border-box",
-
-            borderRadius: "8px",
-
-            background:
-                "#334155",
-
-            border:
-                "1px solid #64748b",
-
-            color:
-                "#e2e8f0",
-
-            fontFamily:
-                "Arial, sans-serif",
-
-            fontSize:
-                "11px",
-
-            zIndex:
-                "999999"
-        }
-    );
-
-
-    bar.innerHTML =
-        `
-        🛡️ NETRA • SCAN UNAVAILABLE
-        `;
-
-
-    insertBar(
-        subjectEl,
-        bar
-    );
-}
-
-
-// ============================================================
-// RISK
-// ============================================================
-
-function normalizeRisk(
-    risk,
-    score
-) {
-
-    const normalized =
-        String(
-            risk || ""
-        ).toUpperCase();
+    let foreground =
+        "#dcfce7";
 
 
     if (
-        [
-            "SAFE",
-            "LOW",
-            "MEDIUM",
-            "HIGH",
-            "CRITICAL"
-        ].includes(
-            normalized
-        )
+        result.score >= 75 ||
+        result.riskLevel === "CRITICAL"
     ) {
 
-        return normalized;
+        background =
+            "#991b1b";
+
+        foreground =
+            "#fee2e2";
+
+    }
+    else if (
+        result.score >= 50 ||
+        result.riskLevel === "HIGH"
+    ) {
+
+        background =
+            "#9a3412";
+
+        foreground =
+            "#ffedd5";
+
+    }
+    else if (
+        result.score >= 25 ||
+        result.riskLevel === "LOW"
+    ) {
+
+        background =
+            "#854d0e";
+
+        foreground =
+            "#fef9c3";
     }
 
 
-    if (score >= 75) {
-        return "CRITICAL";
-    }
+    badge.style.cssText = `
+        display:inline-flex;
+        align-items:center;
+        gap:5px;
+        margin-left:12px;
+        padding:5px 10px;
+        border-radius:999px;
+        background:${background};
+        color:${foreground};
+        font-family:Arial,sans-serif;
+        font-size:12px;
+        font-weight:700;
+        z-index:999999;
+    `;
 
-    if (score >= 50) {
-        return "HIGH";
-    }
 
-    if (score >= 25) {
-        return "LOW";
-    }
+    badge.textContent =
+        `🛡️ NETRA ${result.riskLevel} • ${result.score}/100 • ${result.action}`;
 
-    return "SAFE";
+
+    badge.title =
+        `${result.classification} | Confidence ${result.confidence}%`;
 }
 
 
 // ============================================================
-// LABEL
+// ERROR BADGE
 // ============================================================
 
-function getRiskLabel(
-    risk
+function renderErrorBadge(
+    subjectEl,
+    message
 ) {
 
-    switch (risk) {
-
-        case "SAFE":
-            return "LEGITIMATE";
-
-        case "LOW":
-            return "LOW RISK";
-
-        case "MEDIUM":
-            return "MEDIUM RISK";
-
-        case "HIGH":
-            return "HIGH RISK";
-
-        case "CRITICAL":
-            return "CRITICAL";
-
-        default:
-            return "UNKNOWN";
+    if (!subjectEl) {
+        return;
     }
+
+
+    let badge =
+        document.getElementById(
+            "netra-mail-badge"
+        );
+
+
+    if (!badge) {
+
+        badge =
+            document.createElement(
+                "span"
+            );
+
+        badge.id =
+            "netra-mail-badge";
+
+
+        subjectEl.appendChild(
+            badge
+        );
+    }
+
+
+    badge.style.cssText = `
+        display:inline-flex;
+        align-items:center;
+        margin-left:12px;
+        padding:5px 10px;
+        border-radius:999px;
+        background:#334155;
+        color:#cbd5e1;
+        font-family:Arial,sans-serif;
+        font-size:12px;
+        font-weight:700;
+        z-index:999999;
+    `;
+
+
+    badge.textContent =
+        "⚠️ NETRA SCAN UNAVAILABLE";
+
+
+    badge.title =
+        message ||
+        "NETRA backend is unavailable.";
 }
 
 
 // ============================================================
-// ICON
+// REMOVE BADGE
 // ============================================================
 
-function getRiskIcon(
-    risk
-) {
+function removeNetraBadge() {
 
-    switch (risk) {
+    const badge =
+        document.getElementById(
+            "netra-mail-badge"
+        );
 
-        case "SAFE":
-            return "✓";
 
-        case "LOW":
-            return "✓";
-
-        case "MEDIUM":
-            return "⚠";
-
-        case "HIGH":
-            return "⚠";
-
-        case "CRITICAL":
-            return "⛔";
-
-        default:
-            return "•";
+    if (badge) {
+        badge.remove();
     }
-}
-
-
-// ============================================================
-// COLORS
-// ============================================================
-
-function getRiskBackground(
-    risk
-) {
-
-    switch (risk) {
-
-        case "SAFE":
-            return "#166534";
-
-        case "LOW":
-            return "#365314";
-
-        case "MEDIUM":
-            return "#92400e";
-
-        case "HIGH":
-            return "#991b1b";
-
-        case "CRITICAL":
-            return "#7f1d1d";
-
-        default:
-            return "#334155";
-    }
-}
-
-
-function getRiskBorder(
-    risk
-) {
-
-    switch (risk) {
-
-        case "SAFE":
-            return "#22c55e";
-
-        case "LOW":
-            return "#84cc16";
-
-        case "MEDIUM":
-            return "#f59e0b";
-
-        case "HIGH":
-            return "#ef4444";
-
-        case "CRITICAL":
-            return "#f87171";
-
-        default:
-            return "#64748b";
-    }
-}
-
-
-// ============================================================
-// SLEEP
-// ============================================================
-
-function sleep(ms) {
-
-    return new Promise(
-        resolve =>
-            setTimeout(
-                resolve,
-                ms
-            )
-    );
 }

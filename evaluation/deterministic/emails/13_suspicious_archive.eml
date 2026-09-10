@@ -1,0 +1,21 @@
+From: shipping@example.com
+To: employee@example.com
+Subject: Shipping Documents
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============8312530417823052589=="
+
+--===============8312530417823052589==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+The shipping documents are attached.
+
+--===============8312530417823052589==
+Content-Type: application/zip
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="documents.zip"
+MIME-Version: 1.0
+
+UEsDBEhhcm1sZXNzIFpJUCBzaWduYXR1cmUgdGVzdC4=
+
+--===============8312530417823052589==--
