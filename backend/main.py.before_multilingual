@@ -88,7 +88,6 @@ try:
     from backend.llm_agent import ThreatExplainerAgent
     from backend.ml_classifier import LocalMLClassifier
     from backend.nlp_engine import NLPEngine
-    from backend.multilingual_detector import MultilingualLanguageDetector
     from backend.parser import ForensicEmailParser
     from backend.threat_engine import ThreatScoringEngine
     from backend.services.analysis_orchestrator import AnalysisOrchestrator
@@ -136,7 +135,6 @@ except ImportError:
     from llm_agent import ThreatExplainerAgent
     from ml_classifier import LocalMLClassifier
     from nlp_engine import NLPEngine
-    from multilingual_detector import MultilingualLanguageDetector
     from parser import ForensicEmailParser
     from threat_engine import ThreatScoringEngine
     from services.analysis_orchestrator import AnalysisOrchestrator
@@ -670,25 +668,6 @@ def _build_nlp_result(
 
     raw = raw or {}
 
-    # ------------------------------------------------------------
-    # INDIA-FIRST MULTILINGUAL ANALYSIS
-    # ------------------------------------------------------------
-    try:
-        multilingual = MultilingualLanguageDetector.analyze(text or "")
-    except Exception as exc:
-        multilingual = {
-            "language": "Unknown",
-            "language_code": "und",
-            "language_confidence": 0.0,
-            "script": "unknown",
-            "is_multilingual": False,
-            "detection_method": "error",
-            "detected_scripts": [],
-            "multilingual_findings": {},
-            "multilingual_score": 0,
-            "error": type(exc).__name__,
-        }
-
     def get_category(
         primary: str,
         alternate: str,
@@ -801,25 +780,6 @@ def _build_nlp_result(
             score,
         )
 
-    # Merge language-specific findings into the existing explainable NLP model.
-    multilingual_score = _normalize_score(multilingual.get("multilingual_score", 0))
-    multilingual_findings = multilingual.get("multilingual_findings", {})
-    if not isinstance(multilingual_findings, dict):
-        multilingual_findings = {}
-
-    for category_name, values in multilingual_findings.items():
-        if category_name not in categories or not isinstance(values, list):
-            continue
-        categories[category_name] = sorted(set(
-            categories[category_name] + [str(value) for value in values if value]
-        ))
-
-    urgency = categories["urgency"]
-    financial = categories["financial_fraud"]
-    credentials = categories["credential_harvesting"]
-    social = categories["social_engineering"]
-    score = max(score, multilingual_score)
-
     normalized_text = text.lower()
     legitimate_reset_context = (
         "if you did not request" in normalized_text
@@ -910,25 +870,6 @@ def _build_nlp_result(
 
         "risk_level":
             risk_level,
-
-        "language":
-            multilingual.get("language", "Unknown"),
-        "language_code":
-            multilingual.get("language_code", "und"),
-        "language_confidence":
-            multilingual.get("language_confidence", 0.0),
-        "script":
-            multilingual.get("script", "unknown"),
-        "is_multilingual":
-            bool(multilingual.get("is_multilingual", False)),
-        "detection_method":
-            multilingual.get("detection_method", "unknown"),
-        "detected_scripts":
-            multilingual.get("detected_scripts", []),
-        "multilingual_findings":
-            multilingual_findings,
-        "multilingual_score":
-            multilingual_score,
 
         "raw_findings":
             raw,
@@ -1897,13 +1838,6 @@ def _build_evidence(
                 )
             )
 
-    if nlp.get("multilingual_score", 0):
-        evidence.append(
-            f"Multilingual analysis: {nlp.get('language', 'Unknown')} "
-            f"({nlp.get('script', 'unknown')}) score "
-            f"{nlp.get('multilingual_score', 0)}/45."
-        )
-
     # ------------------------------------------------------------
     # ML
     # ------------------------------------------------------------
@@ -2207,46 +2141,6 @@ def _apply_attachment_scoring_override(
     return result
 
 
-def _apply_multilingual_scoring_signal(
-    result: Dict[str, Any],
-    nlp: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Preserve meaningful multilingual threat evidence in final scoring."""
-    if not isinstance(result, dict) or not isinstance(nlp, dict):
-        return result
-
-    multilingual_score = _normalize_score(nlp.get("multilingual_score", 0))
-    if multilingual_score < 25:
-        return result
-
-    current = _normalize_score(result.get("threat_score", result.get("score", 0)))
-    final_score = max(current, multilingual_score)
-    result["threat_score"] = final_score
-    result["score"] = final_score
-    result["severity"] = (
-        "CRITICAL" if final_score >= 75 else
-        "HIGH" if final_score >= 50 else
-        "MEDIUM" if final_score >= 30 else
-        "LOW"
-    )
-    result["risk_level"] = result["severity"]
-
-    findings = list(result.get("correlation_findings", []) or [])
-    reason = f"Multilingual threat cues detected in {nlp.get('language', 'Unknown')} content."
-    if reason not in findings:
-        findings.append(reason)
-    result["correlation_findings"] = findings
-
-    classifications = list(result.get("attack_classification", []) or [])
-    for label in nlp.get("attack_classification", []) or []:
-        if label not in classifications:
-            classifications.append(label)
-    result["attack_classification"] = classifications
-    result["multilingual_signal"] = multilingual_score
-    result["active_strong_signals"] = max(_normalize_score(result.get("active_strong_signals", 0)), 1)
-    return result
-
-
 def _run_threat_scoring(
     authentication: Dict[str, Any],
     url: Dict[str, Any],
@@ -2497,6 +2391,93 @@ def _apply_ssrf_decision_override(
     classifications = list(decision.get("attack_classification", []) or [])
     if "SSRF / internal resource targeting" not in classifications:
         classifications.append("SSRF / internal resource targeting")
+    decision["attack_classification"] = classifications
+    return decision
+
+
+def _apply_attachment_scoring_signal(
+    scoring: Dict[str, Any],
+    attachments: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Ensure static attachment evidence is not diluted by the weighted engine."""
+    if not isinstance(scoring, dict) or not isinstance(attachments, dict):
+        return scoring
+
+    attachment_score = _normalize_score(attachments.get("score", 0))
+    current = _normalize_score(scoring.get("threat_score", scoring.get("score", 0)))
+
+    if attachment_score <= 0:
+        return scoring
+
+    # Archives and MIME anomalies are meaningful even when they are not
+    # individually enough to justify a BLOCK. Never let the weighted engine
+    # erase an explicit static finding.
+    if attachment_score >= 40:
+        final_score = max(current, attachment_score)
+        scoring["threat_score"] = final_score
+        scoring["score"] = final_score
+        if final_score >= 75:
+            scoring["severity"] = "CRITICAL"
+        elif final_score >= 50:
+            scoring["severity"] = "HIGH"
+        elif final_score >= 25:
+            scoring["severity"] = "LOW"
+        else:
+            scoring["severity"] = "SAFE"
+        scoring["risk_level"] = scoring["severity"]
+        scoring["attachment_signal"] = attachment_score
+        scoring["active_strong_signals"] = max(
+            _normalize_score(scoring.get("active_strong_signals", 0)),
+            1,
+        )
+        scoring["confidence"] = max(
+            _normalize_score(scoring.get("confidence", 0)),
+            65 if attachment_score < 75 else 85,
+        )
+    return scoring
+
+
+def _apply_reply_to_signal(
+    decision: Dict[str, Any],
+    scoring: Dict[str, Any],
+    authentication: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Surface From/Reply-To domain mismatch as a contextual impersonation signal."""
+    if not isinstance(decision, dict) or not isinstance(authentication, dict):
+        return decision
+
+    alignment = authentication.get("alignment", {})
+    if not isinstance(alignment, dict):
+        return decision
+
+    from_domain = str(alignment.get("from_domain") or "").lower()
+    reply_domain = str(alignment.get("reply_to_domain") or "").lower()
+    mismatch = bool(alignment.get("has_mismatch")) and bool(from_domain and reply_domain)
+
+    if not mismatch or from_domain == reply_domain:
+        return decision
+
+    current = _normalize_score(decision.get("score", 0))
+    score = max(current, _normalize_score(scoring.get("threat_score", 0)), 40)
+    # Do not automatically BLOCK solely for Reply-To mismatch: legitimate
+    # mailing systems can use a different Reply-To domain. Keep it contextual.
+    if score < 50:
+        decision["risk"] = "LOW"
+        decision["risk_level"] = "LOW"
+        decision["action"] = "REVIEW"
+    decision["score"] = score
+    decision["confidence"] = max(_normalize_score(decision.get("confidence", 0)), 70)
+
+    reasons = list(decision.get("reasons", []) or [])
+    reason = f"From/Reply-To domain mismatch: {from_domain} -> {reply_domain}."
+    if reason not in reasons:
+        reasons.insert(0, reason)
+    decision["reasons"] = reasons
+
+    classifications = list(decision.get("attack_classification", []) or [])
+    label = "Reply-To mismatch / possible impersonation"
+    if label not in classifications:
+        classifications.append(label)
     decision["attack_classification"] = classifications
     return decision
 
@@ -2998,9 +2979,9 @@ async def _analyze_parsed_email(
     )
 
     scoring = scoring or {}
-    scoring = _apply_multilingual_scoring_signal(
+    scoring = _apply_attachment_scoring_signal(
         scoring,
-        nlp,
+        attachment_analysis,
     )
 
     # ------------------------------------------------------------
@@ -3042,6 +3023,11 @@ async def _analyze_parsed_email(
         decision,
         scoring,
         attachment_analysis,
+    )
+    decision = _apply_reply_to_signal(
+        decision,
+        scoring,
+        authentication,
     )
 
     attachment_reasons = []
