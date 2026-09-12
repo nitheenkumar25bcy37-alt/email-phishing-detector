@@ -83,3 +83,5 @@ class APIClient:
 
     def add_tag(self, case_id: str, tag: str) -> Dict[str, Any]:
         return self.post(f"/api/v2/cases/{case_id}/tags", json={"tag": tag})
+    def analyze_email(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    return self.post("/api/v2/emails/analyze", json=payload)
