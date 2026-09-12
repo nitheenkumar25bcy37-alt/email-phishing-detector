@@ -426,7 +426,8 @@ Team Manager
         )
 
 
-def main():page = st.sidebar.radio(
+def main():
+    page = st.sidebar.radio(
     "Navigate",
     [
         "Overview",
