@@ -113,7 +113,203 @@ def render_email(email_id: str):
     with tabs[3]:
         st.json(result.get("limitations", ["Not enough evidence."]))
 
+def render_attack_simulator():
+    st.title("🧪 NETRA Attack Simulator")
+    st.caption(
+        "Run controlled phishing and legitimate-email scenarios through "
+        "the same NETRA analysis pipeline used for real email analysis."
+    )
 
+    scenarios = {
+        "🏦 Bank Credential Phishing": {
+            "subject": "Urgent: Your Bank Account Will Be Suspended",
+            "sender": "security@bank-secure-login.com",
+            "recipient": "user@example.com",
+            "reply_to": "support@secure-bank-login.com",
+            "body": """
+Dear Customer,
+
+Your bank account has been flagged for suspicious activity.
+
+Your account will be suspended within 24 hours unless you verify
+your account immediately.
+
+Click the link below and confirm your username, password and OTP:
+
+https://bank-secure-login.com/verify
+
+Failure to verify will result in permanent account suspension.
+
+Regards,
+Bank Security Team
+""",
+        },
+
+        "🔐 Microsoft Credential Phishing": {
+            "subject": "Action Required: Your Microsoft 365 Account",
+            "sender": "admin@microsoft-account-security.com",
+            "recipient": "employee@example.com",
+            "reply_to": "security@microsoft-account-security.com",
+            "body": """
+Your Microsoft 365 account requires immediate verification.
+
+We detected unusual sign-in activity on your account.
+
+Please verify your credentials immediately to prevent your account
+from being disabled.
+
+Verify your account:
+https://microsoft-account-security.com/login
+
+Thank you,
+Microsoft Security Team
+""",
+        },
+
+        "💰 CEO Financial Fraud": {
+            "subject": "Urgent Payment Request",
+            "sender": "ceo.company@gmail.com",
+            "recipient": "finance@example.com",
+            "reply_to": "ceo.finance@outlook.com",
+            "body": """
+Hi,
+
+I am currently in a meeting and need you to process an urgent
+payment for an important business transaction.
+
+Please transfer the amount immediately and send me the confirmation.
+
+This is confidential, so please do not discuss it with anyone else.
+
+Regards,
+CEO
+""",
+        },
+
+        "✅ Safe Email": {
+            "subject": "Meeting Agenda for Tomorrow",
+            "sender": "manager@company.com",
+            "recipient": "employee@company.com",
+            "reply_to": "manager@company.com",
+            "body": """
+Hi,
+
+Please find the agenda for tomorrow's team meeting below.
+
+1. Project status updates
+2. Sprint planning
+3. Upcoming deadlines
+4. Team discussion
+
+The meeting will start at 10:00 AM in the usual conference room.
+
+Regards,
+Manager
+""",
+        },
+    }
+
+    selected_scenario = st.selectbox(
+        "Select a scenario",
+        list(scenarios.keys())
+    )
+
+    scenario = scenarios[selected_scenario]
+
+    st.subheader("Simulated Email")
+
+    st.text_input(
+        "Subject",
+        value=scenario["subject"],
+        disabled=True
+    )
+
+    st.text_input(
+        "Sender",
+        value=scenario["sender"],
+        disabled=True
+    )
+
+    st.text_area(
+        "Email Body",
+        value=scenario["body"],
+        height=220,
+        disabled=True
+    )
+
+    if st.button("🚀 RUN NETRA SIMULATION", type="primary"):
+
+        with st.spinner("NETRA is analyzing the email..."):
+
+            result, error = safe_call(
+                client.analyze_email,
+                {
+                    "subject": scenario["subject"],
+                    "sender": scenario["sender"],
+                    "recipient": scenario["recipient"],
+                    "reply_to": scenario["reply_to"],
+                    "body": scenario["body"],
+                    "html": "",
+                    "headers": {},
+                    "received_headers": [],
+                },
+            )
+
+        if error:
+            st.error(f"Simulation failed: {error}")
+            st.info(
+                "Make sure the FastAPI backend is running and "
+                "the dashboard API URL points to port 8001."
+            )
+            return
+
+        st.success("NETRA analysis completed successfully.")
+
+        score = int(result.get("risk_score", 0))
+        classification = result.get("classification", "UNKNOWN")
+        action = result.get("recommended_action", "UNKNOWN")
+
+        st.subheader("NETRA Decision")
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "Risk Score",
+            f"{score}/100"
+        )
+
+        c2.metric(
+            "Classification",
+            classification
+        )
+
+        c3.metric(
+            "Recommended Action",
+            action
+        )
+
+        st.subheader("Why did NETRA make this decision?")
+
+        reasons = result.get("reasons", [])
+
+        if reasons:
+            for reason in reasons:
+                st.write(f"• {reason}")
+        else:
+            st.info("No decision reasons were returned.")
+
+        st.subheader("Attack Classification")
+
+        attacks = result.get("attack_classifications", [])
+
+        if attacks:
+            for attack in attacks:
+                st.write(f"• {attack}")
+        else:
+            st.info("No attack classification returned.")
+
+        with st.expander("Full NETRA Response"):
+            st.json(result)
 def render_cases():
     st.title("Cases")
     with st.expander("Create case"):
@@ -425,36 +621,54 @@ Team Manager
             "analysis pipeline used for real email analysis."
         )
 
-
 def main():
     page = st.sidebar.radio(
-    "Navigate",
-    [
-        "Overview",
-        "Email analysis",
-        "🧪 Attack Simulator",
-        "Campaigns",
-        "Cases",
-        "Reports",
-    ],
+        "Navigate",
+        [
+            "Overview",
+            "Email analysis",
+            "🧪 Attack Simulator",
+            "Campaigns",
+            "Cases",
+            "Reports",
+        ],
     )
+
     st.sidebar.caption(f"API: {client.base_url}")
+
     if page == "Overview":
         render_overview()
+
     elif page == "Email analysis":
         data, error = safe_call(client.emails, 100, 0)
+
         if error:
             st.error(error)
             return
-        email_ids = [item.get("email_id") for item in data.get("items", [])]
-        selected = st.selectbox("Select analyzed email", email_ids or ["No analyses available"])
+
+        email_ids = [
+            item.get("email_id")
+            for item in data.get("items", [])
+        ]
+
+        selected = st.selectbox(
+            "Select analyzed email",
+            email_ids or ["No analyses available"]
+        )
+
         if email_ids:
             render_email(selected)
+
+    elif page == "🧪 Attack Simulator":
+        render_attack_simulator()
+
     elif page == "Campaigns":
         render_campaigns()
+
     elif page == "Cases":
         render_cases()
-    else:
+
+    elif page == "Reports":
         render_reports()
 
 
