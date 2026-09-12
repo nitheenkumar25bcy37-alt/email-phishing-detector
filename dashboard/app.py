@@ -426,8 +426,17 @@ Team Manager
         )
 
 
-def main():
-    page = st.sidebar.radio("Navigate", ["Overview", "Email analysis", "Campaigns", "Cases", "Reports"])
+def main():page = st.sidebar.radio(
+    "Navigate",
+    [
+        "Overview",
+        "Email analysis",
+        "🧪 Attack Simulator",
+        "Campaigns",
+        "Cases",
+        "Reports",
+    ],
+    )
     st.sidebar.caption(f"API: {client.base_url}")
     if page == "Overview":
         render_overview()
