@@ -208,6 +208,222 @@ def render_reports():
         else:
             st.success(f"Report created: {generated.get('report_id')}")
             st.json({key: generated.get(key) for key in ("report_id", "format", "evidence_count", "integrity_verified", "limitations")})
+def render_attack_simulator():
+    st.title("🧪 NETRA Attack Simulator")
+    st.caption(
+        "Run controlled phishing scenarios through the real NETRA analysis pipeline."
+    )
+
+    scenarios = {
+        "Bank Credential Phishing": {
+            "subject": "URGENT: Your SBI account will be suspended",
+            "sender": "security@sbi-account-alert.example",
+            "recipient": "user@example.com",
+            "reply_to": "verify-account@secure-login.example",
+            "body": """
+URGENT ACTION REQUIRED!
+
+Your SBI internet banking account has been temporarily
+restricted due to a security verification issue.
+
+To prevent permanent suspension, verify your account immediately:
+
+https://sbi-secure-login.example/verify
+
+Please enter your username, password and OTP.
+
+Failure to complete verification within 24 hours
+may result in account suspension.
+""",
+        },
+
+        "Microsoft Credential Phishing": {
+            "subject": "Microsoft Security Alert - Verify Your Account",
+            "sender": "security@microsoft-security.example",
+            "recipient": "user@example.com",
+            "reply_to": "verify@microsoft-login.example",
+            "body": """
+Microsoft Security Alert
+
+We detected unusual activity on your Microsoft account.
+
+Verify your identity immediately:
+
+https://microsoft-login.example/verify
+
+You must provide your password and authentication code
+to prevent your account from being locked.
+""",
+        },
+
+        "CEO Financial Fraud": {
+            "subject": "Urgent confidential payment request",
+            "sender": "ceo@company.example",
+            "recipient": "finance@example.com",
+            "reply_to": "private-payment@example.net",
+            "body": """
+I need you to process an urgent payment immediately.
+
+This is confidential. Do not discuss this request with
+anyone else until the transaction is complete.
+
+Please transfer the requested funds to the attached
+beneficiary details today.
+
+This is time sensitive.
+""",
+        },
+
+        "Safe Email": {
+            "subject": "Team meeting tomorrow",
+            "sender": "manager@company.example",
+            "recipient": "user@example.com",
+            "reply_to": "manager@company.example",
+            "body": """
+Hi,
+
+Just a reminder that our team meeting is scheduled
+for tomorrow at 10:00 AM.
+
+Please bring your project updates.
+
+Regards,
+Team Manager
+""",
+        },
+    }
+
+    selected = st.selectbox(
+        "Choose an attack scenario",
+        list(scenarios.keys()),
+    )
+
+    scenario = scenarios[selected]
+
+    st.subheader("Scenario")
+
+    st.write(f"**Subject:** {scenario['subject']}")
+    st.write(f"**Sender:** `{scenario['sender']}`")
+    st.write(f"**Reply-To:** `{scenario['reply_to']}`")
+
+    with st.expander("View simulated email"):
+        st.code(scenario["body"])
+
+    if st.button(
+        "🚀 RUN NETRA SIMULATION",
+        type="primary",
+        use_container_width=True,
+    ):
+        with st.spinner("NETRA is investigating the email..."):
+
+            payload = {
+                "subject": scenario["subject"],
+                "sender": scenario["sender"],
+                "recipient": scenario["recipient"],
+                "reply_to": scenario["reply_to"],
+                "body": scenario["body"],
+                "html": "",
+                "headers": "",
+            }
+
+            result, error = safe_call(
+                client.analyze_email,
+                payload,
+            )
+
+        if error:
+            st.error(f"Simulation failed: {error}")
+            return
+
+        st.success("Analysis completed!")
+
+        score = int(result.get("risk_score", 0))
+        classification = result.get(
+            "classification",
+            "UNKNOWN",
+        )
+
+        st.divider()
+        st.subheader("NETRA Decision")
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "Risk Score",
+            f"{score}/100",
+        )
+
+        c2.metric(
+            "Classification",
+            classification,
+        )
+
+        action_map = {
+            "SAFE": "ALLOW",
+            "LOW": "REVIEW",
+            "HIGH": "QUARANTINE",
+            "CRITICAL": "BLOCK",
+        }
+
+        c3.metric(
+            "Recommended Action",
+            action_map.get(
+                classification,
+                "REVIEW",
+            ),
+        )
+        st.subheader("🔎 Evidence Found")
+
+        findings = result.get(
+            "findings",
+            [],
+        )
+
+        if not findings:
+            st.info(
+                "No structured findings were generated."
+            )
+        else:
+            for finding in findings:
+                severity = str(
+                    finding.get(
+                        "severity",
+                        "unknown",
+                    )
+                ).upper()
+
+                st.markdown(
+                    f"**{finding.get('title', 'Finding')}** "
+                    f"· `{severity}` "
+                    f"· confidence "
+                    f"`{float(finding.get('confidence', 0)):.0%}`"
+                )
+
+                st.write(
+                    finding.get(
+                        "description",
+                        "",
+                    )
+                )
+        st.subheader("🎯 Investigation Summary")
+
+        st.write(
+            f"**Case:** {selected}"
+        )
+
+        st.write(
+            f"**Final risk:** {score}/100"
+        )
+
+        st.write(
+            f"**Decision:** "
+            f"{action_map.get(classification, 'REVIEW')}"
+        )
+
+        st.caption(
+            "This simulation uses the same NETRA backend "
+            "analysis pipeline used for real email analysis."
+        )
 
 
 def main():
